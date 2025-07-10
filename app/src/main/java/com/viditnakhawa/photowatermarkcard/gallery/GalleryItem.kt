@@ -4,7 +4,9 @@ import android.net.Uri
 
 data class GalleryItem(
     val uri: Uri,
-    val dateAdded: Long
+    val dateAdded: Long,
+    val width: Int,
+    val height: Int
 )
 
 //Used to represent either an image or a date header in list

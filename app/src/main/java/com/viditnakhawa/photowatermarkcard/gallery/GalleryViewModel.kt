@@ -2,7 +2,6 @@ package com.viditnakhawa.photowatermarkcard.gallery
 
 import android.app.Application
 import android.content.ContentUris
-import android.os.Build
 import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,10 +23,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             val imageList = mutableListOf<GalleryItem>()
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DATE_ADDED
+                MediaStore.Images.Media.DATE_ADDED,
+                MediaStore.Images.Media.WIDTH, // <-- Request width
+                MediaStore.Images.Media.HEIGHT // <-- Request height
             )
 
-            // Query the "AutoFramed" directory
             val selection = "${MediaStore.Images.Media.DATA} like ?"
             val selectionArgs = arrayOf("%/AutoFramed/%")
             val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
@@ -38,23 +38,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             contentResolver.query(queryUri, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
                 val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
                 val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
+                val widthColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH)
+                val heightColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
                     val dateAdded = cursor.getLong(dateAddedColumn)
+                    val width = cursor.getInt(widthColumn)
+                    val height = cursor.getInt(heightColumn)
                     val contentUri = ContentUris.withAppendedId(queryUri, id)
-                    imageList.add(GalleryItem(uri = contentUri, dateAdded = dateAdded))
+                    imageList.add(GalleryItem(uri = contentUri, dateAdded = dateAdded, width = width, height = height))
                 }
             }
-
-            // Group images by date and create the timeline
             _timelineItems.value = createTimeline(imageList)
         }
     }
 
     private fun createTimeline(images: List<GalleryItem>): List<TimelineItem> {
         val timeline = mutableListOf<TimelineItem>()
-        // Group images by their formatted date string
         val groupedByDate = images.groupBy { getFormattedDate(it.dateAdded) }
 
         for ((date, items) in groupedByDate) {
