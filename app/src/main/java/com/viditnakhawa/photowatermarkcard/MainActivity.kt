@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.viditnakhawa.photowatermarkcard.navigation.AppNavigation
 import com.viditnakhawa.photowatermarkcard.services.AutoFrameService
 import com.viditnakhawa.photowatermarkcard.ui.theme.PhotoWatermarkCardTheme
 
@@ -19,15 +20,15 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            // If permissions are granted, and the service was meant to be on, start it.
+        val isReadImagesGranted = permissions[Manifest.permission.READ_MEDIA_IMAGES] ?: false
+
+        if (isReadImagesGranted) {
             val sharedPrefs = getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
             if (sharedPrefs.getBoolean("service_enabled", false)) {
                 toggleService(this, true)
             }
         } else {
-            Toast.makeText(this, "Permissions are required for the app to function.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Full photo access is recommended for automatic framing.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -38,17 +39,22 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PhotoWatermarkCardTheme {
-                AutomationScreen()
+                AppNavigation()
             }
         }
     }
 
     private fun requestPermissionsIfNeeded() {
         val permissionsToRequest = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
+            permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+            permissionsToRequest.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13
             permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
+        } else { // Below Android 13
             permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
