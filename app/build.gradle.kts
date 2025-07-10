@@ -60,5 +60,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.palette.ktx)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.foundation.layout.android)
+    implementation(libs.androidx.navigation.compose)
 
 }
