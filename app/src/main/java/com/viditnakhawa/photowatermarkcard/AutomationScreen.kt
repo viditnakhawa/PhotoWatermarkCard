@@ -3,6 +3,8 @@ package com.viditnakhawa.photowatermarkcard
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,7 +15,7 @@ import com.viditnakhawa.photowatermarkcard.services.AutoFrameService
 import androidx.core.content.edit
 
 @Composable
-fun AutomationScreen() {
+fun AutomationScreen(onNavigateToGallery: () -> Unit) {
     val context = LocalContext.current
     //SharedPreferences to remember if the service is on/off
     val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
@@ -47,6 +49,17 @@ fun AutomationScreen() {
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.fillMaxWidth(0.8f)
         )
+
+        Spacer(modifier = Modifier.height(48.dp))
+        Button(onClick = onNavigateToGallery) {
+            Icon(
+                Icons.Outlined.Person,
+                contentDescription = null,
+                modifier = Modifier.size(ButtonDefaults.IconSize)
+            )
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text("View Framed Photos")
+        }
     }
 }
 
