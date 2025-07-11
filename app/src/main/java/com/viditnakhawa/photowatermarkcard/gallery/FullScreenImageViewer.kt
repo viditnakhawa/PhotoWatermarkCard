@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import androidx.compose.ui.tooling.preview.Preview
+import com.viditnakhawa.photowatermarkcard.ui.theme.PhotoWatermarkCardTheme
 
 @Composable
 fun FullScreenImageViewer(
@@ -115,7 +117,7 @@ fun FullScreenImageViewer(
                         ViewerBottomBar(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(bottom = 32.dp),
+                                .padding(bottom = 24.dp),
                             onShare = {
                                 val context = it
                                 val shareIntent = Intent().apply {
@@ -159,7 +161,7 @@ fun ZoomableAsyncImage(
     modifier: Modifier = Modifier,
     onTap: () -> Unit
 ) {
-    var scale by remember { mutableStateOf(1f) }
+    var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
@@ -204,13 +206,13 @@ fun ViewerBottomBar(
     val context = LocalContext.current
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(36.dp),
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.primary
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 42.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(36.dp),
+            modifier = Modifier.padding(horizontal = 40.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(66.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             ActionButton(icon = Icons.Outlined.Share, text = "Share") { onShare(context) }
@@ -269,3 +271,43 @@ fun getActivityWindow(): Window? {
         }
     return LocalContext.current.findActivity()?.window
 }
+
+//@Preview(showBackground = true)
+//@Composable
+//private fun FullScreenImageViewerPreview() {
+//    PhotoWatermarkCardTheme {
+//        val sampleUri = Uri.parse("https://picsum.photos/seed/picsum/1080/1920")
+//
+//        FullScreenImageViewer(
+//            imageUri = sampleUri,
+//            onDismiss = {},
+//            onDelete = {},
+//            onEdit = {}
+//        )
+//    }
+//}
+//
+//@Preview(showBackground = true, backgroundColor = 0xFF000000)
+//@Composable
+//private fun ViewerBottomBarPreview() {
+//    PhotoWatermarkCardTheme {
+//        Box(modifier = Modifier.padding(16.dp)) {
+//            ViewerBottomBar(
+//                onShare = {},
+//                onEdit = {},
+//                onDelete = {}
+//            )
+//        }
+//    }
+//}
+//
+//@Preview
+//@Composable
+//private fun DeleteConfirmationDialogPreview() {
+//    PhotoWatermarkCardTheme {
+//        DeleteConfirmationDialog(
+//            onConfirm = {},
+//            onDismiss = {}
+//        )
+//    }
+//}

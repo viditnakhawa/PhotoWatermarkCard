@@ -1,11 +1,16 @@
 package com.viditnakhawa.photowatermarkcard.gallery
 
+import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,13 +25,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Grid3x3
+import androidx.compose.material.icons.outlined.Grid4x4
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -39,6 +47,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +59,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material3.IconButton
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -65,12 +76,46 @@ sealed class LayoutMode {
 fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () -> Unit) {
     val viewModel: GalleryViewModel = viewModel()
     val timelineItems by viewModel.timelineItems.collectAsState()
-    var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showSaveWarningDialog by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE) }
+    val backgroundServiceRunning = remember { mutableStateOf(prefs.getBoolean("service_enabled", false)) }
 
-    // State to manage the current layout mode
     var layoutMode by remember { mutableStateOf<LayoutMode>(LayoutMode.Staggered) }
-    var zoomState by remember { mutableStateOf(1f) }
+    var bottomBarVisible by remember { mutableStateOf(true) }
+
+    val lazyGridState = rememberLazyGridState()
+    val lazyStaggeredGridState = rememberLazyStaggeredGridState()
+
+    val isScrollingDown = remember {
+        var previousOffset = 0
+        var previousIndex = 0
+        derivedStateOf {
+            val currentFirstVisibleIndex = when (layoutMode) {
+                is LayoutMode.Staggered -> lazyStaggeredGridState.firstVisibleItemIndex
+                is LayoutMode.Uniform -> lazyGridState.firstVisibleItemIndex
+            }
+            val currentFirstVisibleOffset = when (layoutMode) {
+                is LayoutMode.Staggered -> lazyStaggeredGridState.firstVisibleItemScrollOffset
+                is LayoutMode.Uniform -> lazyGridState.firstVisibleItemScrollOffset
+            }
+
+            val isScrollingDown = if (previousIndex == currentFirstVisibleIndex) {
+                currentFirstVisibleOffset > previousOffset
+            } else {
+                currentFirstVisibleIndex > previousIndex
+            }
+            previousOffset = currentFirstVisibleOffset
+            previousIndex = currentFirstVisibleIndex
+            isScrollingDown
+        }
+    }
+
+    LaunchedEffect(isScrollingDown.value) {
+        bottomBarVisible = !isScrollingDown.value
+    }
+
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -93,60 +138,27 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
                         fontSize = MaterialTheme.typography.titleLarge.fontSize * 1.05f
                     )
                 },
+                actions = {
+                    LayoutSwitcher(
+                        currentLayout = layoutMode,
+                        onLayoutChange = { newLayout -> layoutMode = newLayout }
+                    )
+                }
             )
         },
-        bottomBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Navigation Pill
-                    BottomBar(
-                        onChooseTemplate = onNavigateToTemplates,
-                        onAutomation = onNavigateToAutomation
-                    )
-                    // Add Button
-                    FloatingActionButton(
-                        onClick = { imagePickerLauncher.launch("image/*") },
-                        shape = RoundedCornerShape(28.dp), // Squircle shape
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    ) {
-                        Icon(Icons.Outlined.Add, contentDescription = "Add Image")
-                    }
-                }
-            }
-        }
     ) { paddingValues ->
-        if (timelineItems.isEmpty()) {
-            EmptyGalleryView(modifier = Modifier.padding(paddingValues))
-        } else {
-            Box(
-                modifier = Modifier
-                    .padding(paddingValues)
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            zoomState *= zoom
-                            if (zoomState > 1.5f || zoomState < 0.7f) {
-                                layoutMode = when (val currentMode = layoutMode) {
-                                    is LayoutMode.Staggered -> LayoutMode.Uniform(3)
-                                    is LayoutMode.Uniform -> if (currentMode.columns == 3) LayoutMode.Uniform(4) else LayoutMode.Staggered
-                                }
-                                zoomState = 1f
-                            }
-                        }
-                    }
-            ) {
+        Box(
+            modifier = Modifier
+                .padding(paddingValues)
+                .fillMaxSize()
+        ) {
+            if (timelineItems.isEmpty()) {
+                EmptyGalleryView(modifier = Modifier.fillMaxSize())
+            } else {
                 when (val mode = layoutMode) {
                     is LayoutMode.Staggered -> {
                         LazyVerticalStaggeredGrid(
+                            state = lazyStaggeredGridState,
                             columns = StaggeredGridCells.Adaptive(minSize = 150.dp),
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(8.dp),
@@ -157,10 +169,7 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
                                 count = timelineItems.size,
                                 key = { timelineItems[it].hashCode() },
                                 span = { index ->
-                                    when (timelineItems[index]) {
-                                        is TimelineItem.HeaderItem -> StaggeredGridItemSpan.FullLine
-                                        is TimelineItem.ImageItem -> StaggeredGridItemSpan.SingleLane
-                                    }
+                                    if (timelineItems[index] is TimelineItem.HeaderItem) StaggeredGridItemSpan.FullLine else StaggeredGridItemSpan.SingleLane
                                 }
                             ) { index ->
                                 val item = timelineItems[index]
@@ -177,6 +186,7 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
                     }
                     is LayoutMode.Uniform -> {
                         LazyVerticalGrid(
+                            state = lazyGridState,
                             columns = GridCells.Fixed(mode.columns),
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(8.dp),
@@ -187,10 +197,7 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
                                 count = timelineItems.size,
                                 key = { timelineItems[it].hashCode() },
                                 span = { index ->
-                                    when (timelineItems[index]) {
-                                        is TimelineItem.HeaderItem -> GridItemSpan(mode.columns)
-                                        is TimelineItem.ImageItem -> GridItemSpan(1)
-                                    }
+                                    if (timelineItems[index] is TimelineItem.HeaderItem) GridItemSpan(mode.columns) else GridItemSpan(1)
                                 }
                             ) { index ->
                                 val item = timelineItems[index]
@@ -207,6 +214,37 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
                     }
                 }
             }
+
+            AnimatedVisibility(
+                visible = bottomBarVisible,
+                enter = slideInVertically { it },
+                exit = slideOutVertically(
+                    animationSpec = tween(durationMillis = 150),
+                    targetOffsetY = { it }
+                ),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BottomBar(
+                        onChooseTemplate = onNavigateToTemplates,
+                        onAutomation = onNavigateToAutomation,
+                        isServiceRunning = backgroundServiceRunning
+                    )
+                    FloatingActionButton(
+                        onClick = { imagePickerLauncher.launch("image/*") },
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = "Add Image")
+                    }
+                }
+            }
         }
     }
 
@@ -214,7 +252,7 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
         SaveWarningDialog(
             onConfirm = {
                 // TODO: Navigate to the framing/automation screen with the selected URI
-                showSaveWarningDialog = null
+                Toast.makeText(context, "Coming soon!", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { showSaveWarningDialog = null }
         )
@@ -231,6 +269,35 @@ fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () 
     )
 }
 
+@Composable
+private fun LayoutSwitcher(
+    currentLayout: LayoutMode,
+    onLayoutChange: (LayoutMode) -> Unit
+) {
+    val (nextLayout, icon, description) = when (currentLayout) {
+        is LayoutMode.Staggered -> {
+            // Currently Staggered, next is 3x3
+            Triple(LayoutMode.Uniform(3), Icons.Outlined.GridView, "Switch to 3x3 Grid")
+        }
+        is LayoutMode.Uniform -> when (currentLayout.columns) {
+            3 -> {
+                // Currently 3x3, next is 4x4
+                Triple(LayoutMode.Uniform(4), Icons.Outlined.Grid3x3, "Switch to 4x4 Grid")
+            }
+            else -> { // Assumes 4x4 or other uniform grids
+                // Currently 4x4, next is Staggered
+                Triple(LayoutMode.Staggered, Icons.Outlined.Grid4x4, "Switch to Staggered Grid")
+            }
+        }
+    }
+
+    IconButton(onClick = { onLayoutChange(nextLayout) }) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description
+        )
+    }
+}
 
 @Composable
 fun SaveWarningDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
