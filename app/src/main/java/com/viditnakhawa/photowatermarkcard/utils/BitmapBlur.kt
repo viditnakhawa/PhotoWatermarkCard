@@ -62,3 +62,4 @@ private fun blurBitmapHardwareRenderer(bitmap: Bitmap, radius: Float): Bitmap {
 
     return softwareBitmap
 }
+

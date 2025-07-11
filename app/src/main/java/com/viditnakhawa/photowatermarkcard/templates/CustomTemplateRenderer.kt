@@ -12,33 +12,36 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 
 /**
- * Renders the classic "Polaroid" style frame.
- * This is the default template, compatible with all Android versions.
- * It features a prominent white border with centered text at the bottom.
+ * -----------------------------------------------
+ * Template 1: PolaroidRenderer
+ * -----------------------------------------------
+ * Creates a classic "Polaroid"-style white border frame around the image.
+ * - Adds equal padding on top/left/right and a thicker bottom margin.
+ * - Displays device name and photo metadata (focal length, aperture, shutter, ISO)
+ * centered at the bottom.
+ * - Compatible with all Android versions.
  */
 class PolaroidRenderer : TemplateRenderer {
     override fun render(context: Context, original: Bitmap, exif: ExifData, deviceName: String): Bitmap {
-        // --- Define Frame Dimensions ---
         val borderTopLeftRight = (original.width * 0.05f).toInt()
         val borderBottom = (original.height * 0.25f).toInt()
         val newWidth = original.width + (borderTopLeftRight * 2)
         val newHeight = original.height + borderTopLeftRight + borderBottom
 
-        // --- Create Canvas and Draw Base ---
         val result = createBitmap(newWidth, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
 
-        // --- Draw the Original Photo ---
+        // Center original photo inside the white frame
         val photoRect = Rect(borderTopLeftRight, borderTopLeftRight, newWidth - borderTopLeftRight, newHeight - borderBottom)
         canvas.drawBitmap(original, null, photoRect, null)
 
-        // --- Handle HDR Gainmap (if available) ---
+        // Copy Ultra HDR gainmap if applicable
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             handleGainmap(original, result, photoRect)
         }
 
-        // --- Prepare Paint for Text ---
+        // Setup paint for title (device name) and metadata (EXIF)
         val deviceNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textSize = newWidth * 0.045f
@@ -52,7 +55,6 @@ class PolaroidRenderer : TemplateRenderer {
             textAlign = Paint.Align.CENTER
         }
 
-        // --- Draw Text ---
         val textCenterX = canvas.width / 2f
         val deviceNameY = photoRect.bottom + (borderBottom * 0.45f)
         val metadataY = deviceNameY + (borderBottom * 0.3f)
@@ -65,66 +67,75 @@ class PolaroidRenderer : TemplateRenderer {
 }
 
 /**
- * Renders the "Aero Blue" style, featuring the photo on a blurred background.
- * This template requires API 31+ to use the new BitmapBlur implementation.
+ * -----------------------------------------------
+ * Template 2: AeroBlueRenderer (API 31+ only)
+ * -----------------------------------------------
+ * Renders the photo with a heavily blurred and darkened version of itself in the background.
+ * - Creates a modern social-media-like aesthetic.
+ * - Adds a blurred background, overlays the original image, and shows text at the bottom.
+ * - Text is white and left-aligned with subtle drop shadows for contrast.
+ * - Timestamp is shown on the right side of the metadata line.
  */
 @RequiresApi(Build.VERSION_CODES.S)
 class AeroBlueRenderer : TemplateRenderer {
     override fun render(context: Context, original: Bitmap, exif: ExifData, deviceName: String): Bitmap {
-        // --- Create Blurred Background using the new BitmapBlur class ---
-        val scaledBitmap =
-            original.scale((original.width * 1.1f).toInt(), (original.height * 1.1f).toInt())
-        val blurredBackground = blurBitmap(context, scaledBitmap, 25f)
+        val border = (original.width * 0.02f).toInt()
+        val captionHeight = (original.height * 0.15f).toInt()
+        val newWidth = original.width + 2 * border
+        val newHeight = original.height + border + captionHeight
 
-        // --- Create Canvas and Draw Base ---
-        val result = createBitmap(
-            blurredBackground.width,
-            blurredBackground.height,
-            original.config ?: Bitmap.Config.ARGB_8888
-        )
+        // 1. Scale original image to fill background and apply strong blur
+        val bgBitmap = original.scale(newWidth, newHeight)
+        val blurredBackground = blurBitmap(context, bgBitmap, 250f)
+
+        // 2. Draw blurred background with dark overlay
+        val result = createBitmap(newWidth, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawBitmap(blurredBackground, 0f, 0f, null)
+        canvas.drawColor(Color.argb(95, 0, 0, 0)) // Dark overlay
 
-        // --- Draw Original Photo in the Center ---
-        val photoRect = Rect(
-            (result.width - original.width) / 2,
-            (result.height - original.height) / 2,
-            (result.width + original.width) / 2,
-            (result.height + original.height) / 2
-        )
+        // 3. Draw original photo centered above blurred background
+        val photoRect = Rect(border, border, newWidth - border, newHeight - captionHeight)
         canvas.drawBitmap(original, null, photoRect, null)
 
-        // --- Prepare Paint for Text ---
-        val padding = result.width * 0.04f
-        val paintDevice = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 4. Prepare shadowed white text paints
+        val deviceNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = result.width * 0.04f
-            typeface = Typeface.create("serif", Typeface.BOLD)
-            setShadowLayer(5f, 2f, 2f, Color.argb(128, 0, 0, 0))
+            textSize = newWidth * 0.035f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            textAlign = Paint.Align.LEFT
+            setShadowLayer(10f, 2f, 2f, Color.argb(150, 0, 0, 0))
         }
-        val paintExif = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val metadataPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            alpha = 200
-            textSize = result.width * 0.025f
-            typeface = Typeface.create("monospace", Typeface.NORMAL)
-            setShadowLayer(5f, 2f, 2f, Color.argb(128, 0, 0, 0))
+            alpha = 220
+            textSize = newWidth * 0.022f
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            textAlign = Paint.Align.LEFT
+            setShadowLayer(8f, 2f, 2f, Color.argb(150, 0, 0, 0))
         }
 
-        // --- Draw Text in Bottom Left ---
+        // 5. Draw text in bottom area
+        val padding = border.toFloat()
         val textBounds = Rect()
-        paintExif.getTextBounds("A", 0, 1, textBounds)
-        val exifLineHeight = textBounds.height() * 1.5f
-        val deviceNameY = result.height - padding - (exifLineHeight * 2)
-        canvas.drawText(deviceName, padding, deviceNameY, paintDevice)
-        canvas.drawText(
-            "${exif.focalLength} f/${exif.aperture} ${exif.shutterSpeed} ISO${exif.iso}",
-            padding,
-            deviceNameY + exifLineHeight,
-            paintExif
-        )
-        canvas.drawText(formatTimestamp(exif.timestamp), padding, deviceNameY + (exifLineHeight * 2), paintExif)
+        deviceNamePaint.getTextBounds("A", 0, 1, textBounds)
+        val deviceLineHeight = textBounds.height() * 1.5f
+        val baseY = photoRect.bottom + (captionHeight - deviceLineHeight * 2) / 2 + deviceLineHeight
+        canvas.drawText(deviceName, padding, baseY, deviceNamePaint)
 
-        // --- Handle HDR Gainmap ---
+        // Draw metadata on the left of the second line
+        val metadataText = "● ${exif.focalLength} | ${exif.aperture} | ${exif.shutterSpeed} | ISO${exif.iso}"
+        metadataPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText(metadataText, padding, baseY + deviceLineHeight, metadataPaint)
+
+        // Draw timestamp on the right of the second line
+        val formattedTimestamp = formatTimestamp(exif.timestamp)
+        if (formattedTimestamp.isNotEmpty()) {
+            metadataPaint.textAlign = Paint.Align.RIGHT
+            canvas.drawText(formattedTimestamp, newWidth - padding, baseY + deviceLineHeight, metadataPaint)
+        }
+
+        // 6. Handle HDR gainmap
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             handleGainmap(original, result, photoRect)
         }
@@ -133,24 +144,28 @@ class AeroBlueRenderer : TemplateRenderer {
 }
 
 /**
- * Renders the "Bottom Bar" style.
+ * -----------------------------------------------
+ * Template 3: BottomBarRenderer
+ * -----------------------------------------------
+ * Adds a clean white bar under the image and displays two lines of text.
+ * - Suitable for social media exports or screenshot tagging.
+ * - Keeps full photo visible, only expands height.
+ * - Timestamp is shown on the right side of the metadata line.
  */
 class BottomBarRenderer : TemplateRenderer {
     override fun render(context: Context, original: Bitmap, exif: ExifData, deviceName: String): Bitmap {
-        // --- Define Dimensions ---
         val barHeight = (original.height * 0.15).toInt()
         val newHeight = original.height + barHeight
 
-        // --- Create a new, taller bitmap ---
-        val result =
-            createBitmap(original.width, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
+        // 1. Create taller bitmap with white background
+        val result = createBitmap(original.width, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
 
-        // --- Draw the original image at the top ---
+        // 2. Draw original image at top
         canvas.drawBitmap(original, 0f, 0f, null)
 
-        // --- Prepare Paint for Text ---
+        // 3. Setup left-aligned text paint
         val padding = original.width * 0.04f
         val paintDevice = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
@@ -163,20 +178,26 @@ class BottomBarRenderer : TemplateRenderer {
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         }
 
-        // --- Draw Text in the new bottom bar area ---
+        // 4. Calculate Y positions and draw text
         val textBounds = Rect()
         paintDevice.getTextBounds("A", 0, 1, textBounds)
         val deviceLineHeight = textBounds.height() * 1.5f
         val baseY = original.height + (barHeight - deviceLineHeight * 2) / 2 + deviceLineHeight
         canvas.drawText(deviceName, padding, baseY, paintDevice)
-        canvas.drawText(
-            "${exif.focalLength}  f/${exif.aperture}  ${exif.shutterSpeed}  ISO${exif.iso}",
-            padding,
-            baseY + deviceLineHeight,
-            paintExif
-        )
 
-        // --- Handle HDR Gainmap ---
+        // Draw metadata on the left of the second line
+        val metadataText = "${exif.focalLength} | ${exif.aperture} | ${exif.shutterSpeed} | ISO${exif.iso}"
+        paintExif.textAlign = Paint.Align.LEFT
+        canvas.drawText(metadataText, padding, baseY + deviceLineHeight, paintExif)
+
+        // Draw timestamp on the right of the second line
+        val formattedTimestamp = formatTimestamp(exif.timestamp)
+        if (formattedTimestamp.isNotEmpty()) {
+            paintExif.textAlign = Paint.Align.RIGHT
+            canvas.drawText(formattedTimestamp, original.width - padding, baseY + deviceLineHeight, paintExif)
+        }
+
+        // 5. Copy HDR gainmap if present
         val photoRect = Rect(0, 0, original.width, original.height)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             handleGainmap(original, result, photoRect)
@@ -186,11 +207,16 @@ class BottomBarRenderer : TemplateRenderer {
 }
 
 /**
- * Renders the "Sunset" style, featuring minimal borders and left-aligned text.
+ * -----------------------------------------------
+ * Template 4: SunsetRenderer
+ * -----------------------------------------------
+ * A minimal border style that adds a small caption area under the image.
+ * - Ideal for editorial-style export (blog, gallery, camera showcase).
+ * - Left-aligned text and clean white background.
+ * - Timestamp is shown on the right side of the metadata line.
  */
 class SunsetRenderer : TemplateRenderer {
     override fun render(context: Context, original: Bitmap, exif: ExifData, deviceName: String): Bitmap {
-        // --- Define Frame Dimensions ---
         val border = (original.width * 0.02).toInt()
         val captionHeight = (original.height * 0.15).toInt()
         val newWidth = original.width + 2 * border
@@ -199,11 +225,11 @@ class SunsetRenderer : TemplateRenderer {
         val canvas = Canvas(result)
         canvas.drawColor(Color.WHITE)
 
-        // --- Draw the Original Photo ---
+        // Draw original photo inside inset area
         val photoRect = Rect(border, border, newWidth - border, newHeight - captionHeight)
         canvas.drawBitmap(original, null, photoRect, null)
 
-        // --- Prepare Paint for Text ---
+        // Text styles for device name and metadata
         val padding = border.toFloat()
         val paintDevice = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
@@ -218,20 +244,24 @@ class SunsetRenderer : TemplateRenderer {
             textAlign = Paint.Align.LEFT
         }
 
-        // --- Draw Text ---
         val textBounds = Rect()
         paintDevice.getTextBounds("A", 0, 1, textBounds)
         val deviceLineHeight = textBounds.height() * 1.5f
         val baseY = photoRect.bottom + (captionHeight - deviceLineHeight * 2) / 2 + deviceLineHeight
         canvas.drawText(deviceName, padding, baseY, paintDevice)
-        canvas.drawText(
-            "● ${exif.focalLength} / f${exif.aperture} / ${exif.shutterSpeed} / ISO${exif.iso}",
-            padding,
-            baseY + deviceLineHeight,
-            paintExif
-        )
 
-        // --- Handle HDR Gainmap ---
+        // Draw metadata on the left of the second line
+        val metadataText = "● ${exif.focalLength} | ${exif.aperture} | ${exif.shutterSpeed} | ISO${exif.iso}"
+        paintExif.textAlign = Paint.Align.LEFT
+        canvas.drawText(metadataText, padding, baseY + deviceLineHeight, paintExif)
+
+        // Draw timestamp on the right of the second line
+        val formattedTimestamp = formatTimestamp(exif.timestamp)
+        if (formattedTimestamp.isNotEmpty()) {
+            paintExif.textAlign = Paint.Align.RIGHT
+            canvas.drawText(formattedTimestamp, newWidth - padding, baseY + deviceLineHeight, paintExif)
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             handleGainmap(original, result, photoRect)
         }
@@ -239,9 +269,15 @@ class SunsetRenderer : TemplateRenderer {
     }
 }
 
+// ---------------------------------------------
+// Helper: Copy Gainmap (HDR Metadata)
+// ---------------------------------------------
 
-// --- SHARED HELPER FUNCTIONS ---
-
+/**
+ * Copies Ultra HDR gainmap from the original Bitmap to the result Bitmap.
+ * - A gainmap stores a second image layer that adjusts brightness on HDR displays.
+ * - This is only supported on Android 14 (API 34) and above.
+ */
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 private fun handleGainmap(original: Bitmap, result: Bitmap, photoRect: Rect) {
     original.gainmap?.let { originalGainmap ->
@@ -256,6 +292,10 @@ private fun handleGainmap(original: Bitmap, result: Bitmap, photoRect: Rect) {
     }
 }
 
+/**
+ * Parses and formats EXIF date strings to user-friendly form.
+ * Input: "yyyy:MM:dd HH:mm:ss" → Output: "11 July 2023 at 15:45"
+ */
 private fun formatTimestamp(dateTimeString: String): String {
     if (dateTimeString.isBlank() || dateTimeString == "N/A") return ""
     return try {

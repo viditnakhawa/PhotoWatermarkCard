@@ -35,14 +35,14 @@ object TemplateRepository {
      * It's built dynamically to include modern templates only on compatible devices.
      */
     val templates: List<FrameTemplate> = buildList {
-        add(FrameTemplate("polaroid", "Polaroid", polaroidRenderer))
-        add(FrameTemplate("sunset", "Sunset", sunsetRenderer))
+        add(FrameTemplate("polaroid", "Polaroid 1", polaroidRenderer))
+        add(FrameTemplate("sunset", "Polaroid 2", sunsetRenderer))
         add(FrameTemplate("bottom_bar", "Bottom Bar", bottomBarRenderer))
 
 
         //RenderEffect-based template only if the device supports it.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(FrameTemplate("aero_blue", "Aero Blue", aeroBlueRenderer))
+            add(FrameTemplate("aero_blue", "Modern Polaroid", aeroBlueRenderer))
         }
     }
 

@@ -49,7 +49,9 @@ object FrameUtils {
                 // 3. Load the source bitmap and its EXIF data.
                 val originalBitmap = loadBitmapFromUri(context, imageUri) ?: return@withContext false
                 val exifDataForDisplay = extractExifDataForDisplay(context, imageUri)
-                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+                val customModel = sharedPrefs.getString("custom_device_model", null)
+                val modelName = if (!customModel.isNullOrBlank()) customModel else Build.MODEL
+                val deviceName = "${Build.MANUFACTURER} $modelName"
 
                 // 4. Delegate the entire rendering process to the template's specific renderer.
                 val framedBitmap = template.renderer.render(context, originalBitmap, exifDataForDisplay, deviceName)
