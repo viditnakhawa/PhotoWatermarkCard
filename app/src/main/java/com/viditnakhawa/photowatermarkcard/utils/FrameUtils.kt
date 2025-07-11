@@ -6,7 +6,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Gainmap
 import android.graphics.ImageDecoder
 import android.graphics.Paint
@@ -25,57 +24,68 @@ import com.viditnakhawa.photowatermarkcard.templates.TemplateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * A utility object for processing images to add a custom frame and metadata.
+ * It includes specialized handling for Ultra HDR images (JPEG_R with Gainmaps)
+ * on Android 14+ to preserve HDR data correctly after composition.
+ */
 object FrameUtils {
 
+    /**
+     * The main function to process an image from a given URI.
+     * It loads the image, creates a new bitmap with a frame and text,
+     * correctly handles the gainmap for HDR images, and saves the result to the gallery.
+     *
+     * @param context The application context.
+     * @param imageUri The URI of the image to process.
+     * @return True if the image was processed and saved successfully, false otherwise.
+     */
     suspend fun processImage(context: Context, imageUri: Uri): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                // Load user preferences and device info
                 val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
-                val selectedTemplateId = sharedPrefs.getString("selected_template_id", "classic_white")
+                val selectedTemplateId = sharedPrefs.getString("selected_template_id", "classic_white") ?: "classic_white"
                 val template = TemplateRepository.findById(selectedTemplateId)
                 val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
 
-                // Load the bitmap using the modern ImageDecoder to preserve color spaces
+                // Load the source bitmap using a modern decoder to preserve properties like gainmaps
                 val originalBitmap = loadBitmapFromUri(context, imageUri) ?: return@withContext false
-
-                // Get the original gainmap if it exists (for HDR images on Android 14+)
-                var originalGainmap: Gainmap? = null
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    originalGainmap = originalBitmap.gainmap
-                }
 
                 // Extract EXIF data for display on the frame
                 val exifDataForDisplay = extractExifDataForDisplay(context, imageUri)
 
-                // Create the new bitmap with our frame drawn on it
+                // Create the new framed bitmap. This function now handles the complex gainmap transformation.
                 val framedBitmap = createFramedBitmap(context, originalBitmap, exifDataForDisplay, deviceName, template)
 
-                // Re-attach the original gainmap to the new framed bitmap
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    if (originalGainmap != null) {
-                        framedBitmap.gainmap = originalGainmap
-                    }
-                }
-
-                // Save the final image (the system handles saving as JPEG_R if a gainmap is present)
+                // Save the final image to the gallery.
                 saveBitmapToGallery(context, framedBitmap, deviceName, imageUri)
 
                 true
             } catch (e: Exception) {
                 e.printStackTrace()
+                // Inform the user on the main thread if an error occurs
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "An error occurred during processing.", Toast.LENGTH_SHORT).show()
+                }
                 false
             }
         }
     }
 
+    /**
+     * Loads a Bitmap from a Uri, ensuring it's mutable and preserves HDR gainmaps.
+     */
     private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val source = ImageDecoder.createSource(context.contentResolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                    // Ensure the bitmap is mutable
                     decoder.isMutableRequired = true
                 }
             } else {
+                // Fallback for older Android versions
                 context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
             }
         } catch (e: Exception) {
@@ -84,20 +94,30 @@ object FrameUtils {
         }
     }
 
+    /**
+     * Extracts a subset of EXIF data from the image URI for display purposes.
+     */
     private fun extractExifDataForDisplay(context: Context, uri: Uri): ExifData {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            val exifInterface = ExifInterface(inputStream)
-            return ExifData(
-                focalLength = exifInterface.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM) ?: "N/A",
-                aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" } ?: "N/A",
-                shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
-                iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
-                timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: ""
-            )
+        try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val exifInterface = ExifInterface(inputStream)
+                return ExifData(
+                    focalLength = exifInterface.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM) ?: "N/A",
+                    aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" } ?: "N/A",
+                    shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
+                    iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
+                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: ""
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return ExifData()
+        return ExifData() // Return default empty data on failure
     }
 
+    /**
+     * Formats a shutter speed float (e.g., 0.004) into a fractional string (e.g., "1/250s").
+     */
     private fun formatShutterSpeed(speed: Float?): String {
         if (speed == null) return "N/A"
         return if (speed < 1.0f) "1/${(1.0f / speed).toInt()}s" else "${speed.toInt()}s"
@@ -110,17 +130,48 @@ object FrameUtils {
         deviceName: String,
         template: FrameTemplate
     ): Bitmap {
+        // Calculate border sizes based on image dimensions
         val borderTopLeftRight = (original.width * 0.05f).toInt()
         val borderBottom = (original.height * 0.25f).toInt()
         val newWidth = original.width + (borderTopLeftRight * 2)
         val newHeight = original.height + borderTopLeftRight + borderBottom
 
+        // Create the new, larger bitmap for final image
         val newBitmap = Bitmap.createBitmap(newWidth, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
         val canvas = Canvas(newBitmap)
         canvas.drawColor(template.frameColor.toArgb())
 
+        // Define the rectangle where the original photo will be drawn
         val photoRect = Rect(borderTopLeftRight, borderTopLeftRight, newWidth - borderTopLeftRight, newHeight - borderBottom)
         canvas.drawBitmap(original, null, photoRect, null)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            original.gainmap?.let { originalGainmap ->
+                // 1. Get the bitmap that represents the original gainmap's content.
+                val originalGainmapContents = originalGainmap.gainmapContents
+
+                val gainmapConfig = originalGainmapContents.config ?: Bitmap.Config.ARGB_8888
+                if (gainmapConfig != Bitmap.Config.HARDWARE) {
+
+                    // 2. Create a new, larger, blank bitmap for new gainmap, matching the final image size.
+                    val newGainmapContents = Bitmap.createBitmap(
+                        newWidth,
+                        newHeight,
+                        gainmapConfig
+                    )
+
+                    // 3. Draw the original gainmap's content into the new gainmap bitmap at the correct offset (photoRect).
+                    val gainmapCanvas = Canvas(newGainmapContents)
+                    gainmapCanvas.drawBitmap(originalGainmapContents, null, photoRect, null)
+
+                    // 4. Create a new Gainmap object from our transformed bitmap.
+                    val newGainmap = Gainmap(newGainmapContents)
+
+                    // 5. Attach the new, correctly positioned gainmap to final framed bitmap.
+                    newBitmap.gainmap = newGainmap
+                }
+            }
+        }
 
         val deviceNameTypeface = if (template.deviceNameFontResId != null) {
             ResourcesCompat.getFont(context, template.deviceNameFontResId)
@@ -140,22 +191,26 @@ object FrameUtils {
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
             textAlign = Paint.Align.CENTER
         }
+
+        // Calculate text positions and draw them on the canvas
         val textBaseX = canvas.width / 2f
         val deviceNameY = photoRect.bottom + (borderBottom * 0.45f)
         val metadataY = deviceNameY + (borderBottom * 0.25f)
         canvas.drawText(deviceName, textBaseX, deviceNameY, deviceNamePaint)
         val metadataText = "${exif.focalLength} | ${exif.aperture} | ${exif.shutterSpeed} | ISO${exif.iso}"
         canvas.drawText(metadataText, textBaseX, metadataY, metadataPaint)
+
         return newBitmap
     }
 
+    /**
+     * Saves the final bitmap to the device's public gallery in the "Pictures/AutoFramed" directory.
+     * It automatically saves as JPEG_R if a gainmap is present on the bitmap.
+     */
     private suspend fun saveBitmapToGallery(context: Context, bitmap: Bitmap, deviceName: String, originalUri: Uri) {
         withContext(Dispatchers.IO) {
-            val hasGainmap = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && bitmap.hasGainmap()
-            val extension = if (hasGainmap) "jpg" else "jpg" // Ultra HDR is still a .jpg
+            val filename = "AutoFrame_${deviceName.replace(" ", "_")}_${System.currentTimeMillis()}.jpg"
             val mimeType = "image/jpeg"
-            val filename = "AutoFrame_${deviceName.replace(" ", "_")}_${System.currentTimeMillis()}.$extension"
-
             var imageUri: Uri? = null
             val resolver = context.contentResolver
 
@@ -172,15 +227,16 @@ object FrameUtils {
                 imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                 imageUri?.let { uri ->
                     resolver.openOutputStream(uri)?.use { fos ->
+                        // The system automatically saves as JPEG_R if bitmap.hasGainmap() is true.
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     }
 
+                    // Mark the image as no longer pending so it's visible to other apps.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         contentValues.clear()
                         contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                         resolver.update(uri, contentValues, null, null)
                     }
-                    copyExifData(context, originalUri, uri)
                 }
 
                 withContext(Dispatchers.Main) {
@@ -191,89 +247,12 @@ object FrameUtils {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) { Toast.makeText(context, "Failed to save image.", Toast.LENGTH_SHORT).show() }
             } finally {
+                // Trigger a media scan to ensure the file is immediately visible in the gallery.
                 imageUri?.let { context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, it)) }
             }
         }
     }
-
-    private fun copyExifData(context: Context, sourceUri: Uri, destUri: Uri) {
-        try {
-            context.contentResolver.openInputStream(sourceUri)?.use { sourceStream ->
-                val sourceExif = ExifInterface(sourceStream)
-                context.contentResolver.openFileDescriptor(destUri, "rw")?.use { destFd ->
-                    val destExif = ExifInterface(destFd.fileDescriptor)
-                    val tags = arrayOf(
-                        ExifInterface.TAG_APERTURE_VALUE, ExifInterface.TAG_ARTIST,
-                        ExifInterface.TAG_BITS_PER_SAMPLE, ExifInterface.TAG_COMPRESSION,
-                        ExifInterface.TAG_CONTRAST, ExifInterface.TAG_COPYRIGHT,
-                        ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_DIGITIZED,
-                        ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DEVICE_SETTING_DESCRIPTION,
-                        ExifInterface.TAG_DIGITAL_ZOOM_RATIO, ExifInterface.TAG_EXIF_VERSION,
-                        ExifInterface.TAG_EXPOSURE_BIAS_VALUE, ExifInterface.TAG_EXPOSURE_INDEX,
-                        ExifInterface.TAG_EXPOSURE_MODE, ExifInterface.TAG_EXPOSURE_PROGRAM,
-                        ExifInterface.TAG_EXPOSURE_TIME, ExifInterface.TAG_FILE_SOURCE,
-                        ExifInterface.TAG_FLASH, ExifInterface.TAG_FLASH_ENERGY,
-                        ExifInterface.TAG_FOCAL_LENGTH, ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-                        ExifInterface.TAG_FOCAL_PLANE_RESOLUTION_UNIT, ExifInterface.TAG_FOCAL_PLANE_X_RESOLUTION,
-                        ExifInterface.TAG_FOCAL_PLANE_Y_RESOLUTION, ExifInterface.TAG_F_NUMBER,
-                        ExifInterface.TAG_GAIN_CONTROL, ExifInterface.TAG_GPS_ALTITUDE,
-                        ExifInterface.TAG_GPS_ALTITUDE_REF, ExifInterface.TAG_GPS_AREA_INFORMATION,
-                        ExifInterface.TAG_GPS_DATESTAMP, ExifInterface.TAG_GPS_DEST_BEARING,
-                        ExifInterface.TAG_GPS_DEST_BEARING_REF, ExifInterface.TAG_GPS_DEST_DISTANCE,
-                        ExifInterface.TAG_GPS_DEST_DISTANCE_REF, ExifInterface.TAG_GPS_DEST_LATITUDE,
-                        ExifInterface.TAG_GPS_DEST_LATITUDE_REF, ExifInterface.TAG_GPS_DEST_LONGITUDE,
-                        ExifInterface.TAG_GPS_DEST_LONGITUDE_REF, ExifInterface.TAG_GPS_DIFFERENTIAL,
-                        ExifInterface.TAG_GPS_DOP, ExifInterface.TAG_GPS_IMG_DIRECTION,
-                        ExifInterface.TAG_GPS_IMG_DIRECTION_REF, ExifInterface.TAG_GPS_LATITUDE,
-                        ExifInterface.TAG_GPS_LATITUDE_REF, ExifInterface.TAG_GPS_LONGITUDE,
-                        ExifInterface.TAG_GPS_LONGITUDE_REF, ExifInterface.TAG_GPS_MAP_DATUM,
-                        ExifInterface.TAG_GPS_MEASURE_MODE, ExifInterface.TAG_GPS_PROCESSING_METHOD,
-                        ExifInterface.TAG_GPS_SATELLITES, ExifInterface.TAG_GPS_SPEED,
-                        ExifInterface.TAG_GPS_SPEED_REF, ExifInterface.TAG_GPS_STATUS,
-                        ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_TRACK,
-                        ExifInterface.TAG_GPS_TRACK_REF, ExifInterface.TAG_GPS_VERSION_ID,
-                        ExifInterface.TAG_IMAGE_DESCRIPTION, ExifInterface.TAG_IMAGE_LENGTH,
-                        ExifInterface.TAG_IMAGE_UNIQUE_ID, ExifInterface.TAG_IMAGE_WIDTH,
-                        ExifInterface.TAG_INTEROPERABILITY_INDEX, ExifInterface.TAG_ISO_SPEED_RATINGS,
-                        ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT, ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT_LENGTH,
-                        ExifInterface.TAG_LIGHT_SOURCE, ExifInterface.TAG_MAKE,
-                        ExifInterface.TAG_MAKER_NOTE, ExifInterface.TAG_MAX_APERTURE_VALUE,
-                        ExifInterface.TAG_METERING_MODE, ExifInterface.TAG_MODEL,
-                        ExifInterface.TAG_OECF, ExifInterface.TAG_ORIENTATION,
-                        ExifInterface.TAG_PHOTOMETRIC_INTERPRETATION, ExifInterface.TAG_PIXEL_X_DIMENSION,
-                        ExifInterface.TAG_PIXEL_Y_DIMENSION, ExifInterface.TAG_PLANAR_CONFIGURATION,
-                        ExifInterface.TAG_PRIMARY_CHROMATICITIES, ExifInterface.TAG_REFERENCE_BLACK_WHITE,
-                        ExifInterface.TAG_RESOLUTION_UNIT, ExifInterface.TAG_ROWS_PER_STRIP,
-                        ExifInterface.TAG_SAMPLES_PER_PIXEL, ExifInterface.TAG_SATURATION,
-                        ExifInterface.TAG_SCENE_CAPTURE_TYPE, ExifInterface.TAG_SCENE_TYPE,
-                        ExifInterface.TAG_SENSING_METHOD, ExifInterface.TAG_SHARPNESS,
-                        ExifInterface.TAG_SHUTTER_SPEED_VALUE, ExifInterface.TAG_SOFTWARE,
-                        ExifInterface.TAG_SPATIAL_FREQUENCY_RESPONSE, ExifInterface.TAG_SPECTRAL_SENSITIVITY,
-                        ExifInterface.TAG_STRIP_BYTE_COUNTS, ExifInterface.TAG_STRIP_OFFSETS,
-                        ExifInterface.TAG_SUBJECT_AREA, ExifInterface.TAG_SUBJECT_DISTANCE,
-                        ExifInterface.TAG_SUBJECT_DISTANCE_RANGE, ExifInterface.TAG_SUBJECT_LOCATION,
-                        ExifInterface.TAG_SUBSEC_TIME, ExifInterface.TAG_SUBSEC_TIME_DIGITIZED,
-                        ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, ExifInterface.TAG_THUMBNAIL_IMAGE_LENGTH,
-                        ExifInterface.TAG_THUMBNAIL_IMAGE_WIDTH, ExifInterface.TAG_TRANSFER_FUNCTION,
-                        ExifInterface.TAG_USER_COMMENT, ExifInterface.TAG_WHITE_BALANCE,
-                        ExifInterface.TAG_WHITE_POINT, ExifInterface.TAG_X_RESOLUTION,
-                        ExifInterface.TAG_Y_CB_CR_COEFFICIENTS, ExifInterface.TAG_Y_CB_CR_POSITIONING,
-                        ExifInterface.TAG_Y_CB_CR_SUB_SAMPLING, ExifInterface.TAG_Y_RESOLUTION
-                    )
-
-                    for (tag in tags) {
-                        val value = sourceExif.getAttribute(tag)
-                        if (value != null) {
-                            destExif.setAttribute(tag, value)
-                        }
-                    }
-                    destExif.saveAttributes()
-                    println("Successfully copied EXIF data.")
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            println("Could not copy EXIF data: ${e.message}")
-        }
-    }
 }
+
+
+
