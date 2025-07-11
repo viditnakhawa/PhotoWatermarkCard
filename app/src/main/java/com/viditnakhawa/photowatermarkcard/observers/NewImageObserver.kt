@@ -31,7 +31,7 @@ class NewImageObserver(
                 debounceJobs.remove(uri)
             }
 
-            handler.postDelayed(job, 300L)
+            handler.postDelayed(job, 1000L)
             debounceJobs[uri] = job
         }
     }
