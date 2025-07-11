@@ -6,10 +6,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.viditnakhawa.photowatermarkcard.AutomationScreen
 import com.viditnakhawa.photowatermarkcard.gallery.GalleryScreen
+import com.viditnakhawa.photowatermarkcard.templates.FrameTemplatesScreen
 
 object AppRoutes {
     const val AUTOMATION_SCREEN = "automation"
     const val GALLERY_SCREEN = "gallery"
+    const val TEMPLATES_SCREEN = "templates"
 }
 
 @Composable
@@ -18,20 +20,31 @@ fun AppNavigation() {
 
     NavHost(
         navController = navController,
-        startDestination = AppRoutes.AUTOMATION_SCREEN
+        startDestination = AppRoutes.GALLERY_SCREEN
     ) {
         composable(AppRoutes.AUTOMATION_SCREEN) {
             AutomationScreen(
-                onNavigateToGallery = {
-                    navController.navigate(AppRoutes.GALLERY_SCREEN)
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(AppRoutes.TEMPLATES_SCREEN) {
+            FrameTemplatesScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }
 
         composable(AppRoutes.GALLERY_SCREEN) {
             GalleryScreen(
-                onNavigateBack = {
-                    navController.popBackStack()
+                onNavigateToAutomation = {
+                    navController.navigate(AppRoutes.AUTOMATION_SCREEN)
+                },
+                onNavigateToTemplates = {
+                    navController.navigate((AppRoutes.TEMPLATES_SCREEN))
                 }
             )
         }

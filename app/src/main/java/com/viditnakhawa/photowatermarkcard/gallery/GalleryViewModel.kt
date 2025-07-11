@@ -2,6 +2,7 @@ package com.viditnakhawa.photowatermarkcard.gallery
 
 import android.app.Application
 import android.content.ContentUris
+import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -79,6 +80,24 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             today -> "Today"
             yesterday -> "Yesterday"
             else -> SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(itemCalendar.time)
+        }
+    }
+
+    fun deleteImage(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Get the application's content resolver to interact with the MediaStore.
+                val contentResolver = getApplication<Application>().contentResolver
+
+                contentResolver.delete(uri, null, null)
+
+                loadAutoFramedImages()
+
+            } catch (e: SecurityException) {
+                e.printStackTrace()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 }

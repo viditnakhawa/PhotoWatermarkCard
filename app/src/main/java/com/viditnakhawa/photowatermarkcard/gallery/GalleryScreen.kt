@@ -1,53 +1,84 @@
 package com.viditnakhawa.photowatermarkcard.gallery
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.content.Intent
-import android.content.pm.ActivityInfo
-import android.os.Build
-import android.view.Window
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
+// Sealed class to represent the different possible layouts for the gallery
+sealed class LayoutMode {
+    data object Staggered : LayoutMode()
+    data class Uniform(val columns: Int) : LayoutMode()
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun GalleryScreen(onNavigateBack: () -> Unit) {
+fun GalleryScreen(onNavigateToAutomation: () -> Unit, onNavigateToTemplates: () -> Unit) {
     val viewModel: GalleryViewModel = viewModel()
     val timelineItems by viewModel.timelineItems.collectAsState()
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showSaveWarningDialog by remember { mutableStateOf<Uri?>(null) }
 
-    // Load images when the screen is first composed
+    // State to manage the current layout mode
+    var layoutMode by remember { mutableStateOf<LayoutMode>(LayoutMode.Staggered) }
+    var zoomState by remember { mutableStateOf(1f) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            showSaveWarningDialog = it
+        }
+    }
     LaunchedEffect(Unit) {
         viewModel.loadAutoFramedImages()
     }
@@ -55,46 +86,123 @@ fun GalleryScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Framed Photos") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                title = {
+                    Text(
+                        "AutoFrame",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = MaterialTheme.typography.titleLarge.fontSize * 1.05f
+                    )
+                },
+            )
+        },
+        bottomBar = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Navigation Pill
+                    BottomBar(
+                        onChooseTemplate = onNavigateToTemplates,
+                        onAutomation = onNavigateToAutomation
+                    )
+                    // Add Button
+                    FloatingActionButton(
+                        onClick = { imagePickerLauncher.launch("image/*") },
+                        shape = RoundedCornerShape(28.dp), // Squircle shape
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = "Add Image")
                     }
                 }
-            )
+            }
         }
     ) { paddingValues ->
         if (timelineItems.isEmpty()) {
             EmptyGalleryView(modifier = Modifier.padding(paddingValues))
         } else {
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Adaptive(minSize = 150.dp),
+            Box(
                 modifier = Modifier
                     .padding(paddingValues)
-                    .fillMaxSize(),
-                contentPadding = PaddingValues(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalItemSpacing = 8.dp
-            ) {
-                items(timelineItems, key = { it.hashCode() }) { item ->
-                    when (item) {
-                        is TimelineItem.HeaderItem -> {
-                            Text(
-                                text = item.date,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp, horizontal = 4.dp)
-                            )
-                            Spacer(modifier = Modifier.fillMaxWidth().height(0.dp))
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, zoom, _ ->
+                            zoomState *= zoom
+                            if (zoomState > 1.5f || zoomState < 0.7f) {
+                                layoutMode = when (val currentMode = layoutMode) {
+                                    is LayoutMode.Staggered -> LayoutMode.Uniform(3)
+                                    is LayoutMode.Uniform -> if (currentMode.columns == 3) LayoutMode.Uniform(4) else LayoutMode.Staggered
+                                }
+                                zoomState = 1f
+                            }
                         }
-                        is TimelineItem.ImageItem -> {
-                            GalleryImage(
-                                item = item.galleryItem,
-                                onClick = { selectedImageUri = item.galleryItem.uri },
-                                modifier = Modifier
-                            )
+                    }
+            ) {
+                when (val mode = layoutMode) {
+                    is LayoutMode.Staggered -> {
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Adaptive(minSize = 150.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalItemSpacing = 8.dp
+                        ) {
+                            items(
+                                count = timelineItems.size,
+                                key = { timelineItems[it].hashCode() },
+                                span = { index ->
+                                    when (timelineItems[index]) {
+                                        is TimelineItem.HeaderItem -> StaggeredGridItemSpan.FullLine
+                                        is TimelineItem.ImageItem -> StaggeredGridItemSpan.SingleLane
+                                    }
+                                }
+                            ) { index ->
+                                val item = timelineItems[index]
+                                when (item) {
+                                    is TimelineItem.HeaderItem -> HeaderText(item.date)
+                                    is TimelineItem.ImageItem -> GalleryImage(
+                                        item = item.galleryItem,
+                                        isStaggered = true,
+                                        onClick = { selectedImageUri = item.galleryItem.uri }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    is LayoutMode.Uniform -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(mode.columns),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(
+                                count = timelineItems.size,
+                                key = { timelineItems[it].hashCode() },
+                                span = { index ->
+                                    when (timelineItems[index]) {
+                                        is TimelineItem.HeaderItem -> GridItemSpan(mode.columns)
+                                        is TimelineItem.ImageItem -> GridItemSpan(1)
+                                    }
+                                }
+                            ) { index ->
+                                val item = timelineItems[index]
+                                when (item) {
+                                    is TimelineItem.HeaderItem -> HeaderText(item.date)
+                                    is TimelineItem.ImageItem -> GalleryImage(
+                                        item = item.galleryItem,
+                                        isStaggered = false,
+                                        onClick = { selectedImageUri = item.galleryItem.uri }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -102,28 +210,77 @@ fun GalleryScreen(onNavigateBack: () -> Unit) {
         }
     }
 
+    showSaveWarningDialog?.let { uri ->
+        SaveWarningDialog(
+            onConfirm = {
+                // TODO: Navigate to the framing/automation screen with the selected URI
+                showSaveWarningDialog = null
+            },
+            onDismiss = { showSaveWarningDialog = null }
+        )
+    }
+
     FullScreenImageViewer(
         imageUri = selectedImageUri,
-        onDismiss = { selectedImageUri = null }
+        onDismiss = { selectedImageUri = null },
+        onDelete = {
+            selectedImageUri?.let { viewModel.deleteImage(it) }
+            selectedImageUri = null
+        },
+        onEdit = { /* TODO */ }
+    )
+}
+
+
+@Composable
+fun SaveWarningDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Manual Framing") },
+        text = { Text("Images you frame manually will not be saved to your gallery by default. You will need to save it yourself after framing.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Continue")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
     )
 }
 
 @Composable
-fun GalleryImage(item: GalleryItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val aspectRatio = if (item.height > 0) item.width.toFloat() / item.height.toFloat() else 1f
+fun HeaderText(date: String) {
+    Text(
+        text = date,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp, horizontal = 4.dp)
+    )
+}
+
+@Composable
+fun GalleryImage(item: GalleryItem, isStaggered: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val aspectRatio = if (isStaggered && item.height > 0) {
+        item.width.toFloat() / item.height.toFloat()
+    } else {
+        1f
+    }
 
     AsyncImage(
         model = ImageRequest.Builder(LocalContext.current)
             .data(item.uri)
             .crossfade(true)
-            .crossfade(400)
             .build(),
         contentDescription = "Framed Photo",
         contentScale = ContentScale.Crop,
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(aspectRatio)
-            .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onClick)
     )
 }
@@ -148,88 +305,4 @@ fun EmptyGalleryView(modifier: Modifier = Modifier) {
             )
         }
     }
-}
-
-@Composable
-fun FullScreenImageViewer(
-    imageUri: android.net.Uri?,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        val window = getActivityWindow()
-        DisposableEffect(imageUri, window) {
-            if (imageUri != null && window != null) {
-                window.colorMode = ActivityInfo.COLOR_MODE_HDR
-                onDispose {
-                    window.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
-                }
-            } else {
-                onDispose { }
-            }
-        }
-    }
-
-
-    AnimatedVisibility(
-        visible = imageUri != null,
-        enter = fadeIn(animationSpec = tween(300)),
-        exit = fadeOut(animationSpec = tween(300))
-    ) {
-        Dialog(
-            onDismissRequest = onDismiss,
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f))
-                    .clickable(onClick = onDismiss)
-            ) {
-                AsyncImage(
-                    model = imageUri,
-                    contentDescription = "Full-screen Image",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                )
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                }
-                IconButton(
-                    onClick = {
-                        val shareIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_STREAM, imageUri)
-                            type = "image/jpeg"
-                        }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp)
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun getActivityWindow(): Window? {
-    tailrec fun Context.findActivity(): Activity? =
-        when (this) {
-            is Activity -> this
-            is ContextWrapper -> baseContext.findActivity()
-            else -> null
-        }
-    return LocalContext.current.findActivity()?.window
 }
