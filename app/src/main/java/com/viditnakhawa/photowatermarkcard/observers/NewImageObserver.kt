@@ -37,14 +37,20 @@ class NewImageObserver(
     }
 
     private fun isNewCameraImage(context: Context, uri: Uri): Boolean {
-        val projection = arrayOf(MediaStore.Images.Media.DATA)
+        val projection = arrayOf(
+            MediaStore.Images.Media.DATA,
+            MediaStore.Images.Media.DATE_ADDED
+        )
         try {
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA))
-                    return path != null &&
-                            (path.contains("/DCIM/", true) || path.contains("/Pictures/", true)) &&
-                            !path.contains("/AutoFramed/", true)
+                    val dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED))
+                    val isRecent = (System.currentTimeMillis() / 1000) - dateAdded < 15
+                    val isFromCamera = path != null && path.contains("/DCIM/", true)
+                    val isScreenshot = path != null && path.contains("/Screenshots/", true)
+                    val isAlreadyFramed = path != null && path.contains("/AutoFramed/", true)
+                    return isRecent && isFromCamera && !isScreenshot && !isAlreadyFramed
                 }
             }
         } catch (e: Exception) {
