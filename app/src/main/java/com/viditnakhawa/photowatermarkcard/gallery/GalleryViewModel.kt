@@ -100,4 +100,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             }
         }
     }
+
+    fun deleteImages(uris: Set<Uri>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val contentResolver = getApplication<Application>().contentResolver
+                for (uri in uris) {
+                    contentResolver.delete(uri, null, null)
+                }
+                // Refresh the list after deletion
+                loadAutoFramedImages()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 }
+

@@ -12,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,6 +24,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -53,104 +56,112 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.tooling.preview.Preview
 import com.viditnakhawa.photowatermarkcard.ui.theme.PhotoWatermarkCardTheme
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FullScreenImageViewer(
-    imageUri: Uri?,
+    imageItems: List<TimelineItem.ImageItem>,
+    initialIndex: Int,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit,
+    onDelete: (Uri) -> Unit,
     onEdit: (Uri) -> Unit
 ) {
-    var controlsVisible by remember { mutableStateOf(true) }
-    val window = getActivityWindow()
-    DisposableEffect(imageUri, window) {
-        if (imageUri == null || window == null) {
-            onDispose {}
-        } else {
-            val originalColorMode = window.attributes?.colorMode ?: ActivityInfo.COLOR_MODE_DEFAULT
-            window.colorMode = ActivityInfo.COLOR_MODE_HDR
+
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex,
+        pageCount = { imageItems.size }
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        var controlsVisible by remember { mutableStateOf(true) }
+        var showDeleteDialog by remember { mutableStateOf<Uri?>(null) }
+        val window = getActivityWindow()
+
+        // Set HDR color mode for the window
+        DisposableEffect(window) {
+            val originalColorMode = window?.attributes?.colorMode ?: ActivityInfo.COLOR_MODE_DEFAULT
+            window?.colorMode = ActivityInfo.COLOR_MODE_HDR
             onDispose {
-                window.colorMode = originalColorMode
+                window?.colorMode = originalColorMode
             }
         }
-    }
 
-    AnimatedVisibility(
-        visible = imageUri != null,
-        enter = fadeIn(animationSpec = tween(150)),
-        exit = fadeOut(animationSpec = tween(150))
-    ) {
-        Dialog(
-            onDismissRequest = onDismiss,
-            properties = DialogProperties(usePlatformDefaultWidth = false)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.9f))
+                .pointerInput(Unit) {
+                    // Toggle controls visibility on tap
+                    detectTapGestures(onTap = { controlsVisible = !controlsVisible })
+                }
         ) {
-            var showDeleteDialog by remember { mutableStateOf(false) }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.9f))
-            ) {
-                if (imageUri != null) {
-                    ZoomableAsyncImage(
-                        imageUri = imageUri,
-                        modifier = Modifier.fillMaxSize(),
-                        onTap = { controlsVisible = !controlsVisible }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(16.dp)
-                        ) {
-                            Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
-                        }
-
-                        // New Bottom Action Bar
-                        ViewerBottomBar(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 24.dp),
-                            onShare = {
-                                val context = it
-                                val shareIntent = Intent().apply {
-                                    action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_STREAM, imageUri)
-                                    type = "image/jpeg"
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
-                            },
-                            onEdit = {
-                                // TODO: Implement edit functionality
-                                val context = it
-                                Toast.makeText(context, "Edit coming soon!", Toast.LENGTH_SHORT).show()
-                                if (imageUri != null) {
-                                    onEdit(imageUri)
-                                }
-                            },
-                            onDelete = { showDeleteDialog = true }
-                        )
-                    }
-                }
-            }
-
-            if (showDeleteDialog) {
-                DeleteConfirmationDialog(
-                    onConfirm = {
-                        onDelete()
-                        showDeleteDialog = false
-                    },
-                    onDismiss = { showDeleteDialog = false }
+            // The core of the new viewer: the HorizontalPager
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { pageIndex ->
+                // Each page in the pager is a zoomable image
+                ZoomableAsyncImage(
+                    imageUri = imageItems[pageIndex].galleryItem.uri,
+                    modifier = Modifier.fillMaxSize(),
+                    onTap = { controlsVisible = !controlsVisible }
                 )
             }
+
+            // --- UI Controls (Close button, Bottom Bar) ---
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(animationSpec = tween(150)),
+                exit = fadeOut(animationSpec = tween(150))
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(16.dp)
+                    ) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
+                    }
+
+                    ViewerBottomBar(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 24.dp),
+                        onShare = { context ->
+                            val currentUri = imageItems[pagerState.currentPage].galleryItem.uri
+                            val shareIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_STREAM, currentUri)
+                                type = "image/jpeg"
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                        },
+                        onEdit = {
+                            val currentUri = imageItems[pagerState.currentPage].galleryItem.uri
+                            onEdit(currentUri)
+                        },
+                        onDelete = {
+                            // Show confirmation dialog for the current image
+                            showDeleteDialog = imageItems[pagerState.currentPage].galleryItem.uri
+                        }
+                    )
+                }
+            }
+        }
+
+        // --- Delete Confirmation Dialog ---
+        showDeleteDialog?.let { uriToDelete ->
+            DeleteConfirmationDialog(
+                onConfirm = {
+                    onDelete(uriToDelete)
+                    showDeleteDialog = null
+                },
+                onDismiss = { showDeleteDialog = null }
+            )
         }
     }
 }
