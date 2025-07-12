@@ -16,69 +16,89 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * A utility object for processing images. It orchestrates the process of loading an image,
- * applying a selected frame template via its specific renderer, and saving the result.
+ * ----------------------------------------------------
+ * FrameUtils
+ * ----------------------------------------------------
+ * A utility object that:
+ * - Loads a photo from a URI
+ * - Extracts EXIF data (focal length, aperture, etc.)
+ * - Applies a selected frame template (Polaroid, Aero, etc.)
+ * - Saves the final image to the gallery
+ *
+ * This handles the entire framing pipeline end-to-end.
  */
 object FrameUtils {
 
     /**
-     * The main function to process an image from a given URI.
-     * It loads the image, finds the appropriate template renderer, delegates the drawing,
-     * and saves the final result to the gallery.
+     * Main entry point to process an image by framing it.
      *
-     * @param context The application context.
-     * @param imageUri The URI of the image to process.
-     * @return True if the image was processed and saved successfully, false otherwise.
+     * @param context The Android Context
+     * @param imageUri URI of the source image to be framed
+     * @param templateId Optional specific template ID (e.g., "sunset"). If null, the default saved in preferences is used.
+     * @return True if processing and saving succeeded, false otherwise
      */
-    suspend fun processImage(context: Context, imageUri: Uri): Boolean {
+    suspend fun processImage(context: Context, imageUri: Uri, templateId: String? = null): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // 1. Load user preferences to find the selected template ID. Default to "polaroid".
-                val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
-                val selectedTemplateId = sharedPrefs.getString("selected_template_id", "polaroid")
+                // --- Select template ID ---
+                val finalTemplateId = if (templateId != null) {
+                    templateId
+                } else {
+                    val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
+                    sharedPrefs.getString("selected_template_id", "polaroid") // fallback to "polaroid"
+                }
 
-                // 2. Find the template from the repository.
-                val template = TemplateRepository.findById(selectedTemplateId)
+                // --- Find the corresponding template from the repository ---
+                val template = TemplateRepository.findById(finalTemplateId)
                 if (template == null) {
+                    // Show error on UI thread
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "No templates available on this device.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Template not found.", Toast.LENGTH_LONG).show()
                     }
                     return@withContext false
                 }
 
-                // 3. Load the source bitmap and its EXIF data.
+                // --- Load the image from URI into a Bitmap ---
                 val originalBitmap = loadBitmapFromUri(context, imageUri) ?: return@withContext false
+
+                // --- Extract EXIF metadata for rendering ---
                 val exifDataForDisplay = extractExifDataForDisplay(context, imageUri)
+
+                // --- Build final device name (allow custom override) ---
+                val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
                 val customModel = sharedPrefs.getString("custom_device_model", null)
                 val modelName = if (!customModel.isNullOrBlank()) customModel else Build.MODEL
                 val deviceName = "${Build.MANUFACTURER} $modelName"
 
-                // 4. Delegate the entire rendering process to the template's specific renderer.
+                // --- Delegate to the selected template renderer ---
                 val framedBitmap = template.renderer.render(context, originalBitmap, exifDataForDisplay, deviceName)
 
-                // 5. Save the final, framed bitmap to the gallery.
-                saveBitmapToGallery(context, framedBitmap, deviceName)
+                // --- Save the result to MediaStore/Gallery ---
+                saveBitmapToGallery(context, framedBitmap, deviceName, imageUri)
 
-                true
+                return@withContext true
+
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "An error occurred during processing.", Toast.LENGTH_SHORT).show()
                 }
-                false
+                return@withContext false
             }
         }
     }
 
     /**
-     * Loads a Bitmap from a Uri, ensuring it's mutable.
+     * Loads a mutable Bitmap from a given URI.
+     *
+     * Uses ImageDecoder (API 28+) or MediaStore (pre-API 28).
      */
     private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val source = ImageDecoder.createSource(context.contentResolver, uri)
                 ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                    decoder.isMutableRequired = true
+                    decoder.isMutableRequired = true // ensures we can draw on it later
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -91,178 +111,9 @@ object FrameUtils {
     }
 
     /**
-     * Extracts a subset of EXIF data from the image URI for display.
-     */
-    private fun extractExifDataForDisplay(context: Context, uri: Uri): ExifData {
-        try {
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                val exifInterface = ExifInterface(inputStream)
-                return ExifData(
-                    focalLength = exifInterface.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM) ?: "N/A",
-                    aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" } ?: "N/A",
-                    shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
-                    iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
-                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: ""
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return ExifData() // Return default empty data on failure
-    }
-
-    /**
-     * Formats a shutter speed float (e.g., 0.004) into a fractional string (e.g., "1/250s").
-     */
-    private fun formatShutterSpeed(speed: Float?): String {
-        if (speed == null) return "N/A"
-        return if (speed < 1.0f) "1/${(1.0f / speed).toInt()}s" else "${speed.toInt()}s"
-    }
-
-    /**
-     * Saves the final bitmap to the device's public gallery in the "Pictures/AutoFramed" directory.
-     */
-    private suspend fun saveBitmapToGallery(context: Context, bitmap: Bitmap, deviceName: String) {
-        withContext(Dispatchers.IO) {
-            val filename = "AutoFrame_${deviceName.replace(" ", "_")}_${System.currentTimeMillis()}.jpg"
-            val mimeType = "image/jpeg"
-            var imageUri: Uri? = null
-            val resolver = context.contentResolver
-
-            try {
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AutoFramed")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
-                    }
-                }
-
-                imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                imageUri?.let { uri ->
-                    resolver.openOutputStream(uri)?.use { fos ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
-                    }
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        contentValues.clear()
-                        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        resolver.update(uri, contentValues, null, null)
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Image saved to 'AutoFramed' album!", Toast.LENGTH_SHORT).show()
-                }
-
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) { Toast.makeText(context, "Failed to save image.", Toast.LENGTH_SHORT).show() }
-            } finally {
-                imageUri?.let { context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, it)) }
-            }
-        }
-    }
-}
-
-/*
-import android.content.ContentValues
-import android.content.Context
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Gainmap
-import android.graphics.ImageDecoder
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.Typeface
-import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
-import android.widget.Toast
-import androidx.compose.ui.graphics.toArgb
-import androidx.core.content.res.ResourcesCompat
-import androidx.exifinterface.media.ExifInterface
-import com.viditnakhawa.photowatermarkcard.ExifData
-import com.viditnakhawa.photowatermarkcard.templates.FrameTemplate
-import com.viditnakhawa.photowatermarkcard.templates.TemplateRepository
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-/**
- * A utility object for processing images to add a custom frame and metadata.
- * It includes specialized handling for Ultra HDR images (JPEG_R with Gainmaps)
- * on Android 14+ to preserve HDR data correctly after composition.
- */
-object FrameUtils {
-
-    /**
-     * The main function to process an image from a given URI.
-     * It loads the image, creates a new bitmap with a frame and text,
-     * correctly handles the gainmap for HDR images, and saves the result to the gallery.
+     * Extracts relevant EXIF tags (focal length, aperture, shutter speed, ISO, timestamp).
      *
-     * @param context The application context.
-     * @param imageUri The URI of the image to process.
-     * @return True if the image was processed and saved successfully, false otherwise.
-     */
-    suspend fun processImage(context: Context, imageUri: Uri): Boolean {
-        return withContext(Dispatchers.IO) {
-            try {
-                // Load user preferences and device info
-                val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
-                val selectedTemplateId = sharedPrefs.getString("selected_template_id", "classic_white") ?: "classic_white"
-                val template = TemplateRepository.findById(selectedTemplateId)
-                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
-
-                // Load the source bitmap using a modern decoder to preserve properties like gainmaps
-                val originalBitmap = loadBitmapFromUri(context, imageUri) ?: return@withContext false
-
-                // Extract EXIF data for display on the frame
-                val exifDataForDisplay = extractExifDataForDisplay(context, imageUri)
-
-                // Create the new framed bitmap. This function now handles the complex gainmap transformation.
-                val framedBitmap = createFramedBitmap(context, originalBitmap, exifDataForDisplay, deviceName, template)
-
-                // Save the final image to the gallery.
-                saveBitmapToGallery(context, framedBitmap, deviceName, imageUri)
-
-                true
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // Inform the user on the main thread if an error occurs
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "An error occurred during processing.", Toast.LENGTH_SHORT).show()
-                }
-                false
-            }
-        }
-    }
-
-    /**
-     * Loads a Bitmap from a Uri, ensuring it's mutable and preserves HDR gainmaps.
-     */
-    private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(context.contentResolver, uri)
-                ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                    // Ensure the bitmap is mutable
-                    decoder.isMutableRequired = true
-                }
-            } else {
-                // Fallback for older Android versions
-                context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-    /**
-     * Extracts a subset of EXIF data from the image URI for display purposes.
+     * Used for drawing captions in the framed image.
      */
     private fun extractExifDataForDisplay(context: Context, uri: Uri): ExifData {
         try {
@@ -279,100 +130,30 @@ object FrameUtils {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return ExifData() // Return default empty data on failure
+
+        // Return a default placeholder on failure
+        return ExifData()
     }
 
     /**
-     * Formats a shutter speed float (e.g., 0.004) into a fractional string (e.g., "1/250s").
+     * Converts a shutter speed (float seconds) to a human-readable string.
+     * Example: 0.004f → "1/250s"
      */
     private fun formatShutterSpeed(speed: Float?): String {
         if (speed == null) return "N/A"
-        return if (speed < 1.0f) "1/${(1.0f / speed).toInt()}s" else "${speed.toInt()}s"
-    }
-
-    private fun createFramedBitmap(
-        context: Context,
-        original: Bitmap,
-        exif: ExifData,
-        deviceName: String,
-        template: FrameTemplate
-    ): Bitmap {
-        // Calculate border sizes based on image dimensions
-        val borderTopLeftRight = (original.width * 0.05f).toInt()
-        val borderBottom = (original.height * 0.25f).toInt()
-        val newWidth = original.width + (borderTopLeftRight * 2)
-        val newHeight = original.height + borderTopLeftRight + borderBottom
-
-        // Create the new, larger bitmap for final image
-        val newBitmap = Bitmap.createBitmap(newWidth, newHeight, original.config ?: Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(newBitmap)
-        canvas.drawColor(template.frameColor.toArgb())
-
-        // Define the rectangle where the original photo will be drawn
-        val photoRect = Rect(borderTopLeftRight, borderTopLeftRight, newWidth - borderTopLeftRight, newHeight - borderBottom)
-        canvas.drawBitmap(original, null, photoRect, null)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            original.gainmap?.let { originalGainmap ->
-                // 1. Get the bitmap that represents the original gainmap's content.
-                val originalGainmapContents = originalGainmap.gainmapContents
-
-                val gainmapConfig = originalGainmapContents.config ?: Bitmap.Config.ARGB_8888
-                if (gainmapConfig != Bitmap.Config.HARDWARE) {
-
-                    // 2. Create a new, larger, blank bitmap for new gainmap, matching the final image size.
-                    val newGainmapContents = Bitmap.createBitmap(
-                        newWidth,
-                        newHeight,
-                        gainmapConfig
-                    )
-
-                    // 3. Draw the original gainmap's content into the new gainmap bitmap at the correct offset (photoRect).
-                    val gainmapCanvas = Canvas(newGainmapContents)
-                    gainmapCanvas.drawBitmap(originalGainmapContents, null, photoRect, null)
-
-                    // 4. Create a new Gainmap object from our transformed bitmap.
-                    val newGainmap = Gainmap(newGainmapContents)
-
-                    // 5. Attach the new, correctly positioned gainmap to final framed bitmap.
-                    newBitmap.gainmap = newGainmap
-                }
-            }
-        }
-
-        val deviceNameTypeface = if (template.deviceNameFontResId != null) {
-            ResourcesCompat.getFont(context, template.deviceNameFontResId)
+        return if (speed < 1.0f) {
+            "1/${(1.0f / speed).toInt()}s"
         } else {
-            Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            "${speed.toInt()}s"
         }
-
-        val deviceNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = template.deviceNameTextColor.toArgb()
-            textSize = newWidth * 0.05f
-            typeface = deviceNameTypeface
-            textAlign = Paint.Align.CENTER
-        }
-        val metadataPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = template.metadataTextColor.toArgb()
-            textSize = newWidth * 0.025f
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            textAlign = Paint.Align.CENTER
-        }
-
-        // Calculate text positions and draw them on the canvas
-        val textBaseX = canvas.width / 2f
-        val deviceNameY = photoRect.bottom + (borderBottom * 0.45f)
-        val metadataY = deviceNameY + (borderBottom * 0.25f)
-        canvas.drawText(deviceName, textBaseX, deviceNameY, deviceNamePaint)
-        val metadataText = "${exif.focalLength} | ${exif.aperture} | ${exif.shutterSpeed} | ISO${exif.iso}"
-        canvas.drawText(metadataText, textBaseX, metadataY, metadataPaint)
-
-        return newBitmap
     }
 
     /**
-     * Saves the final bitmap to the device's public gallery in the "Pictures/AutoFramed" directory.
-     * It automatically saves as JPEG_R if a gainmap is present on the bitmap.
+     * Saves the final framed Bitmap to the system gallery using MediaStore.
+     *
+     * - Creates a new file in "Pictures/AutoFramed"
+     * - Uses MediaStore API (Q+ compatible)
+     * - Triggers media scanner to make the file visible
      */
     private suspend fun saveBitmapToGallery(context: Context, bitmap: Bitmap, deviceName: String, originalUri: Uri) {
         withContext(Dispatchers.IO) {
@@ -382,41 +163,50 @@ object FrameUtils {
             val resolver = context.contentResolver
 
             try {
+                // --- Prepare MediaStore values ---
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AutoFramed")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1) // mark as pending while writing
                     }
                 }
 
+                // --- Insert into MediaStore ---
                 imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
                 imageUri?.let { uri ->
                     resolver.openOutputStream(uri)?.use { fos ->
-                        // The system automatically saves as JPEG_R if bitmap.hasGainmap() is true.
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     }
 
-                    // Mark the image as no longer pending so it's visible to other apps.
+                    // --- Mark file as ready (remove IS_PENDING flag) ---
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         contentValues.clear()
                         contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                         resolver.update(uri, contentValues, null, null)
                     }
+                    ExifUtils.copyExifData(context, originalUri, uri)
                 }
 
+                // --- Notify user and refresh gallery ---
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Image saved to 'AutoFramed' album!", Toast.LENGTH_SHORT).show()
                 }
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                withContext(Dispatchers.Main) { Toast.makeText(context, "Failed to save image.", Toast.LENGTH_SHORT).show() }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to save image.", Toast.LENGTH_SHORT).show()
+                }
+
             } finally {
-                // Trigger a media scan to ensure the file is immediately visible in the gallery.
-                imageUri?.let { context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, it)) }
+                // --- Force media scanner to detect file immediately (pre-API 29 fallback) ---
+                imageUri?.let {
+                    context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, it))
+                }
             }
         }
     }
-}*/
+}
