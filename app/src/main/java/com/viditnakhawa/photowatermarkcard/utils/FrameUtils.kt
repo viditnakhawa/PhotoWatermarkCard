@@ -14,7 +14,7 @@ import com.viditnakhawa.photowatermarkcard.ExifData
 import com.viditnakhawa.photowatermarkcard.templates.TemplateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import android.graphics.Matrix
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 /**
  * ----------------------------------------------------
@@ -45,8 +45,12 @@ object FrameUtils {
                 val finalTemplateId = if (templateId != null) {
                     templateId
                 } else {
-                    val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
-                    sharedPrefs.getString("selected_template_id", "polaroid") // fallback to "polaroid"
+                    val sharedPrefs =
+                        context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
+                    sharedPrefs.getString(
+                        "selected_template_id",
+                        "polaroid"
+                    ) // fallback to "polaroid"
                 }
 
                 // --- Find the corresponding template from the repository ---
@@ -60,13 +64,15 @@ object FrameUtils {
                 }
 
                 // --- Load the image from URI into a Bitmap ---
-                val originalBitmap = loadBitmapFromUri(context, imageUri) ?: return@withContext false
+                val originalBitmap =
+                    loadBitmapFromUri(context, imageUri) ?: return@withContext false
 
                 // --- Extract EXIF metadata for rendering ---
                 val exifDataForDisplay = extractExifDataForDisplay(context, imageUri)
 
                 // --- Build final device name (allow custom override) ---
-                val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
+                val sharedPrefs =
+                    context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
                 val customModel = sharedPrefs.getString("custom_device_model", null)
                 val manufacturer = exifDataForDisplay.make ?: Build.MANUFACTURER
                 val modelName = customModel ?: exifDataForDisplay.model ?: Build.MODEL
@@ -74,7 +80,14 @@ object FrameUtils {
 
 
                 // --- Delegate to the selected template renderer ---
-                val framedBitmap = template.renderer.render(context, originalBitmap, exifDataForDisplay, deviceName, manufacturer, modelName)
+                val framedBitmap = template.renderer.render(
+                    context,
+                    originalBitmap,
+                    exifDataForDisplay,
+                    deviceName,
+                    manufacturer,
+                    modelName
+                )
 
                 // --- Save the result to MediaStore/Gallery ---
                 saveBitmapToGallery(context, framedBitmap, deviceName, imageUri)
@@ -84,7 +97,11 @@ object FrameUtils {
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "An error occurred during processing.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        context,
+                        "An error occurred during processing.",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
                 return@withContext false
             }
@@ -98,14 +115,9 @@ object FrameUtils {
      */
     private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(context.contentResolver, uri)
-                ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
-                    decoder.isMutableRequired = true // ensures we can draw on it later
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.isMutableRequired = true // ensures we can draw on it later
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -123,11 +135,15 @@ object FrameUtils {
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 val exifInterface = ExifInterface(inputStream)
                 return ExifData(
-                    focalLength = exifInterface.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM) ?: "N/A",
-                    aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" } ?: "N/A",
-                    shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
-                    iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
-                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: "",
+                    focalLength = exifInterface.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM)
+                        ?: "N/A",
+                    aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)
+                        ?.let { "f/$it" } ?: "N/A",
+                    shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)
+                        ?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
+                    iso = exifInterface.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY) ?: "N/A",
+                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                        ?: "",
                     gpsLatitude = exifInterface.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
                     gpsLatitudeRef = exifInterface.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
                     gpsLongitude = exifInterface.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
@@ -164,9 +180,15 @@ object FrameUtils {
      * - Uses MediaStore API (Q+ compatible)
      * - Triggers media scanner to make the file visible
      */
-    private suspend fun saveBitmapToGallery(context: Context, bitmap: Bitmap, deviceName: String, originalUri: Uri) {
+    private suspend fun saveBitmapToGallery(
+        context: Context,
+        bitmap: Bitmap,
+        deviceName: String,
+        originalUri: Uri
+    ) {
         withContext(Dispatchers.IO) {
-            val filename = "AutoFrame_${deviceName.replace(" ", "_")}_${System.currentTimeMillis()}.jpg"
+            val filename =
+                "AutoFrame_${deviceName.replace(" ", "_")}_${System.currentTimeMillis()}.jpg"
             val mimeType = "image/jpeg"
             var imageUri: Uri? = null
             val resolver = context.contentResolver
@@ -181,11 +203,18 @@ object FrameUtils {
                 }
 
                 // --- Insert into MediaStore ---
-                imageUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                imageUri =
+                    resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
 
                 imageUri?.let { uri ->
                     resolver.openOutputStream(uri)?.use { fos ->
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+                        resolver.update(uri, contentValues, null, null)
+
+                        NotificationUtils.showFramingCompleteNotification(context, uri)
+
+                        val intent = Intent("com.viditnakhawa.photowatermarkcard.ACTION_IMAGE_FRAMED")
+                        LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
                     }
 
                     ExifUtils.copyExifData(context, originalUri, uri)
@@ -194,23 +223,14 @@ object FrameUtils {
                     contentValues.clear()
                     contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                     resolver.update(uri, contentValues, null, null)
-                }
 
-                // --- Notify user and refresh gallery ---
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Image saved to 'AutoFramed' album!", Toast.LENGTH_SHORT).show()
+                    // --- Notify user and refresh gallery ---
+                    NotificationUtils.showFramingCompleteNotification(context, uri)
                 }
-
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Failed to save image.", Toast.LENGTH_SHORT).show()
-                }
-
-            } finally {
-                // --- Force media scanner to detect file immediately (pre-API 29 fallback) ---
-                imageUri?.let {
-                    context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, it))
                 }
             }
         }
