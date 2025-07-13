@@ -40,7 +40,7 @@ object TemplateRepository {
      */
     val templates: List<FrameTemplate> = buildList {
         add(FrameTemplate("polaroid", "Polaroid 1", R.drawable.preview_polaroid, null , polaroidRenderer))
-        add(FrameTemplate("sunset", "Polaroid 2", R.drawable.preview_sunset, R.drawable.preview_sunset, sunsetRenderer))
+        add(FrameTemplate("sunset", "Polaroid 2", R.drawable.preview_sunset_color, R.drawable.preview_sunset_white, sunsetRenderer))
         add(FrameTemplate("bottom_bar", "Bottom Bar", R.drawable.preview_bottom_bar, null, bottomBarRenderer))
 
 
