@@ -49,7 +49,7 @@ object ExifUtils {
                         ExifInterface.TAG_GPS_TRACK_REF, ExifInterface.TAG_GPS_VERSION_ID,
                         ExifInterface.TAG_IMAGE_DESCRIPTION, ExifInterface.TAG_IMAGE_LENGTH,
                         ExifInterface.TAG_IMAGE_UNIQUE_ID, ExifInterface.TAG_IMAGE_WIDTH,
-                        ExifInterface.TAG_INTEROPERABILITY_INDEX, ExifInterface.TAG_ISO_SPEED_RATINGS,
+                        ExifInterface.TAG_INTEROPERABILITY_INDEX, ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
                         ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT, ExifInterface.TAG_JPEG_INTERCHANGE_FORMAT_LENGTH,
                         ExifInterface.TAG_LIGHT_SOURCE, ExifInterface.TAG_MAKE,
                         ExifInterface.TAG_MAKER_NOTE, ExifInterface.TAG_MAX_APERTURE_VALUE,

@@ -105,7 +105,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                             ?: exifInterface.getAttribute(ExifInterface.TAG_APERTURE_VALUE)?.let { formatAperture(it) }
                             ?: "N/A",
                         shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
-                        iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
+                        iso = exifInterface.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY) ?: "N/A",
                         timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
                             ?: exifInterface.getAttribute(ExifInterface.TAG_DATETIME)
                             ?: "N/A",
