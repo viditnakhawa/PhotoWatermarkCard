@@ -4,7 +4,7 @@ import android.net.Uri
 
 data class GalleryItem(
     val uri: Uri,
-    val dateAdded: Long,
+    val dateTimestamp: Long,
     val width: Int,
     val height: Int
 )

@@ -383,10 +383,6 @@ fun GalleryScreen(
                 viewModel.deleteImage(imageUri)
                 viewerState = null
             },
-            onEdit = { imageUri ->
-                viewerState = null
-                onNavigateToTemplates(imageUri)
-            }
         )
     }
 }
@@ -500,7 +496,6 @@ fun GalleryImage(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(aspectRatio)
-            .clip(RoundedCornerShape(4.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick

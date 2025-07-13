@@ -22,7 +22,13 @@ data class ExifData(
     val aperture: String = "N/A",
     val shutterSpeed: String = "N/A",
     val iso: String = "N/A",
-    val timestamp: String = "N/A"
+    val timestamp: String = "N/A",
+    val gpsLatitude: String? = null,
+    val gpsLatitudeRef: String? = null,
+    val gpsLongitude: String? = null,
+    val gpsLongitudeRef: String? = null,
+    val make: String? = null,
+    val model: String? = null
 )
 
 /**
@@ -102,7 +108,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                         iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
                         timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
                             ?: exifInterface.getAttribute(ExifInterface.TAG_DATETIME)
-                            ?: "N/A"
+                            ?: "N/A",
                     )
                     _uiState.update { it.copy(exifData = newExifData) }
                 }
@@ -124,21 +130,5 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             "${speed.toInt()}s"
         }
-    }
-
-    private fun formatTimestamp(dateTimeString: String): String {
-        return try {
-            val parser = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.getDefault())
-            val formatter = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale.getDefault())
-            val date = parser.parse(dateTimeString)
-            if (date != null) formatter.format(date) else "N/A"
-        } catch (e: Exception) {
-            "N/A"
-        }
-    }
-
-    fun onSaveClicked() {
-        // TODO: In Phase 5, implement the image saving logic
-        println("Save button clicked!")
     }
 }
