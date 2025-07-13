@@ -49,6 +49,7 @@
 
 - Preserves the original photo’s resolution and properly handles all EXIF orientation tags.
 - Saves all framed photos into a dedicated **“AutoFramed”** album.
+- Ultra HDR Compatible: Preserves and displays Ultra HDR gain maps for brilliant, high-contrast photos on compatible devices.
 - Optimized for performance and battery life using modern Android APIs like `WorkManager` and `ContentObserver`.
 
 ---
