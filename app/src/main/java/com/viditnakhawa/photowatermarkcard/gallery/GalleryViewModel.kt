@@ -4,7 +4,8 @@ import android.app.Application
 import android.content.ContentUris
 import android.net.Uri
 import android.provider.MediaStore
-import androidx.exifinterface.media.ExifInterface // --- NEW --- Add this import
+import android.util.LruCache
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -20,21 +21,20 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _timelineItems = MutableStateFlow<List<TimelineItem>>(emptyList())
     val timelineItems = _timelineItems.asStateFlow()
 
+    private val timestampCache = LruCache<Uri, Long>(200)
+
     fun loadAutoFramedImages() {
         viewModelScope.launch(Dispatchers.IO) {
             val imageList = mutableListOf<GalleryItem>()
-
             val projection = arrayOf(
                 MediaStore.Images.Media._ID,
-                MediaStore.Images.Media.DATE_ADDED, //Fallback
+                MediaStore.Images.Media.DATE_ADDED,
                 MediaStore.Images.Media.WIDTH,
                 MediaStore.Images.Media.HEIGHT
             )
-
             val selection = "${MediaStore.Images.Media.DATA} like ?"
             val selectionArgs = arrayOf("%/AutoFramed/%")
             val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-
             val queryUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             val contentResolver = getApplication<Application>().contentResolver
 
@@ -50,23 +50,17 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     val height = cursor.getInt(heightColumn)
                     val contentUri = ContentUris.withAppendedId(queryUri, id)
 
-                    // 1. Try to get the timestamp directly from the file's EXIF data.
-                    val exifTimestamp = getExifTimestamp(contentUri)
-
-                    // 2. If EXIF fails, fall back to DATE_ADDED from MediaStore.
-                    val finalTimestamp = if (exifTimestamp != null) {
-                        exifTimestamp
-                    } else {
-                        val dateAdded = cursor.getLong(dateAddedColumn)
-                        dateAdded * 1000
+                    val finalTimestamp = timestampCache.get(contentUri) ?: run {
+                        val exifTimestamp = getExifTimestamp(contentUri)
+                        val timestamp = exifTimestamp ?: (cursor.getLong(dateAddedColumn) * 1000)
+                        timestampCache.put(contentUri, timestamp)
+                        timestamp
                     }
 
                     imageList.add(GalleryItem(uri = contentUri, dateTimestamp = finalTimestamp, width = width, height = height))
                 }
             }
-
             val sortedList = imageList.sortedByDescending { it.dateTimestamp }
-
             _timelineItems.value = createTimeline(sortedList)
         }
     }
@@ -79,13 +73,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                     ?: exifInterface.getAttribute(ExifInterface.TAG_DATETIME)
 
                 if (dateString != null) {
-                    // Parse the string into a real date object
                     val format = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.getDefault())
                     return format.parse(dateString)?.time
                 }
             }
         } catch (e: Exception) {
-
             e.printStackTrace()
         }
         return null
@@ -127,6 +119,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun deleteImage(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
+            timestampCache.remove(uri)
             try {
                 val contentResolver = getApplication<Application>().contentResolver
                 contentResolver.delete(uri, null, null)
@@ -139,6 +132,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun deleteImages(uris: Set<Uri>) {
         viewModelScope.launch(Dispatchers.IO) {
+            uris.forEach { timestampCache.remove(it) }
             try {
                 val contentResolver = getApplication<Application>().contentResolver
                 for (uri in uris) {

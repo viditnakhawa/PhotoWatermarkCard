@@ -57,6 +57,10 @@ import coil.request.ImageRequest
 import com.viditnakhawa.photowatermarkcard.templates.TemplateRepository
 import com.viditnakhawa.photowatermarkcard.utils.FrameUtils
 import kotlinx.coroutines.launch
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 // Sealed class to represent the different possible layouts for the gallery
 sealed class LayoutMode {
@@ -77,7 +81,6 @@ fun GalleryScreen(
 ) {
     val viewModel: GalleryViewModel = viewModel()
     val timelineItems by viewModel.timelineItems.collectAsState()
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var viewerState by remember { mutableStateOf<ViewerState?>(null) }
     var imageToFrameManuallyUri by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
@@ -96,7 +99,10 @@ fun GalleryScreen(
     val lazyGridState = rememberLazyGridState()
     val lazyStaggeredGridState = rememberLazyStaggeredGridState()
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var previousOffset by remember { mutableIntStateOf(0) }
+    var previousIndex by remember { mutableIntStateOf(0) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -109,10 +115,21 @@ fun GalleryScreen(
         }
     }
 
+    DisposableEffect(context, viewModel) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                viewModel.loadAutoFramedImages()
+            }
+        }
+        val filter = IntentFilter("com.viditnakhawa.photowatermarkcard.ACTION_IMAGE_FRAMED")
+        LocalBroadcastManager.getInstance(context).registerReceiver(receiver, filter)
 
-    val isScrollingDown = remember {
-        var previousOffset = 0
-        var previousIndex = 0
+        onDispose {
+            LocalBroadcastManager.getInstance(context).unregisterReceiver(receiver)
+        }
+    }
+
+    val isScrollingDown = remember(lazyGridState, lazyStaggeredGridState) {
         derivedStateOf {
             val currentFirstVisibleIndex = when (layoutMode) {
                 is LayoutMode.Staggered -> lazyStaggeredGridState.firstVisibleItemIndex
@@ -123,14 +140,15 @@ fun GalleryScreen(
                 is LayoutMode.Uniform -> lazyGridState.firstVisibleItemScrollOffset
             }
 
-            val isScrollingDown = if (previousIndex == currentFirstVisibleIndex) {
+            val isDown = if (previousIndex == currentFirstVisibleIndex) {
                 currentFirstVisibleOffset > previousOffset
             } else {
                 currentFirstVisibleIndex > previousIndex
             }
+
             previousOffset = currentFirstVisibleOffset
             previousIndex = currentFirstVisibleIndex
-            isScrollingDown
+            isDown
         }
     }
 
@@ -486,10 +504,20 @@ fun GalleryImage(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+
     val aspectRatio = if (isStaggered && item.height > 0) {
         item.width.toFloat() / item.height.toFloat()
     } else {
         1f
+    }
+
+    val context = LocalContext.current
+
+    val imageRequest = remember(item.uri) {
+        ImageRequest.Builder(context)
+            .data(item.uri)
+            .crossfade(true)
+            .build()
     }
 
     Box(
@@ -502,10 +530,7 @@ fun GalleryImage(
             )
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(item.uri)
-                .crossfade(true)
-                .build(),
+            model = imageRequest,
             contentDescription = "Framed Photo",
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
