@@ -390,34 +390,23 @@ class SunsetRenderer : TemplateRenderer {
         val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
         val useGradient = sharedPrefs.getBoolean("sunset_gradient_enabled", true)
 
-        // --- Gradient Background ---
-        val sampleHeight = (original.height * 0.05f).toInt()
-        val topRegionBitmap = Bitmap.createBitmap(original, 0, 0, original.width, sampleHeight)
-        val bottomRegionBitmap = Bitmap.createBitmap(original, 0, original.height - sampleHeight, original.width, sampleHeight)
-
-        val midColor: Int
+        var midColor: Int
 
         if (useGradient) {
-            val topColor = topRegionBitmap.scale(1, 1, false)[0, 0]
-            val bottomColor = bottomRegionBitmap.scale(1, 1, false)[0, 0]
+            val topColor = getAverageColor(original, 0)
+            val bottomColor = getAverageColor(original, original.height - 1)
 
-            val imageGradient = LinearGradient(
-                0f, 0f,
-                0f, newHeight.toFloat(),
-                topColor, bottomColor,
-                Shader.TileMode.CLAMP
-            )
+            val imageGradient = LinearGradient(0f, 0f, 0f, newHeight.toFloat(), topColor, bottomColor, Shader.TileMode.CLAMP)
             val gradientPaint = Paint().apply { shader = imageGradient }
             canvas.drawRect(0f, 0f, newWidth.toFloat(), newHeight.toFloat(), gradientPaint)
 
-            // Sample midpoint color
-            val midX = newWidth / 2f
-            val midY = photoRect.bottom + (captionHeight / 2f)
+            // Sample midpoint color for text contrast
             val bgPaint = Paint().apply { shader = imageGradient }
             val bgBitmapForSampling = createBitmap(1, 1)
-            val bgCanvas = Canvas(bgBitmapForSampling)
-            bgCanvas.translate(-midX, -midY)
-            bgCanvas.drawRect(0f, 0f, newWidth.toFloat(), newHeight.toFloat(), bgPaint)
+            Canvas(bgBitmapForSampling).apply {
+                translate(-(newWidth / 2f), -(photoRect.bottom + captionHeight / 2f))
+                drawRect(0f, 0f, newWidth.toFloat(), newHeight.toFloat(), bgPaint)
+            }
             midColor = bgBitmapForSampling[0, 0]
         } else {
             canvas.drawColor(Color.WHITE)
@@ -426,7 +415,6 @@ class SunsetRenderer : TemplateRenderer {
 
         canvas.drawBitmap(original, null, photoRect, null)
 
-        // --- Text Color Logic ---
         val textColor = if (isColorDark(midColor)) Color.WHITE else Color.BLACK
         val subTextColor = if (isColorDark(midColor)) Color.LTGRAY else Color.DKGRAY
 
@@ -454,17 +442,13 @@ class SunsetRenderer : TemplateRenderer {
             textAlign = Paint.Align.RIGHT
         }
 
-        // --- Font Metrics Based Centering ---
         val deviceMetrics = leftPaintDevice.fontMetrics
         val exifMetrics = leftPaintExif.fontMetrics
-
         val deviceLineHeight = deviceMetrics.descent - deviceMetrics.ascent
         val exifLineHeight = exifMetrics.descent - exifMetrics.ascent
         val totalTextHeight = deviceLineHeight + exifLineHeight
-
         val captionTop = photoRect.bottom
         val captionCenterY = captionTop + (captionHeight / 2f)
-
         val deviceBaselineY = captionCenterY - (totalTextHeight / 2f) - deviceMetrics.ascent
         val exifBaselineY = deviceBaselineY + exifLineHeight
 
@@ -472,10 +456,8 @@ class SunsetRenderer : TemplateRenderer {
         val metadataText = "● ${exif.focalLength}mm | ${exif.aperture} | ${exif.shutterSpeed} | ISO ${exif.iso}"
         canvas.drawText(metadataText, padding, exifBaselineY, leftPaintExif)
 
-        // --- Right Aligned Date + Location ---
         val lat = formatGpsCoordinate(exif.gpsLatitude, exif.gpsLatitudeRef)
         val lon = formatGpsCoordinate(exif.gpsLongitude, exif.gpsLongitudeRef)
-
         var dateYear: String? = null
         var dateMonthDay: String? = null
         try {
@@ -502,12 +484,25 @@ class SunsetRenderer : TemplateRenderer {
             canvas.drawText(lon, gpsX, exifBaselineY, rightAlignPaint)
         }
 
-        // Gainmap (Ultra HDR)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             handleGainmap(original, result, photoRect)
         }
-
         return result
+    }
+
+    private fun getAverageColor(bitmap: Bitmap, y: Int): Int {
+        val pixels = IntArray(bitmap.width)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, y, bitmap.width, 1)
+        var red = 0L
+        var green = 0L
+        var blue = 0L
+        for (color in pixels) {
+            red += Color.red(color)
+            green += Color.green(color)
+            blue += Color.blue(color)
+        }
+        val count = pixels.size
+        return Color.rgb((red / count).toInt(), (green / count).toInt(), (blue / count).toInt())
     }
 }
 
