@@ -1,6 +1,8 @@
 package com.viditnakhawa.photowatermarkcard.templates
 
+import com.viditnakhawa.photowatermarkcard.R
 import android.os.Build
+import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
 
 /**
@@ -14,6 +16,8 @@ import androidx.annotation.RequiresApi
 data class FrameTemplate(
     val id: String,
     val name: String,
+    @DrawableRes val previewImageRes: Int,
+    @DrawableRes val disabledPreviewImageRes: Int? = null,
     val renderer: TemplateRenderer
 )
 
@@ -35,14 +39,14 @@ object TemplateRepository {
      * It's built dynamically to include modern templates only on compatible devices.
      */
     val templates: List<FrameTemplate> = buildList {
-        add(FrameTemplate("polaroid", "Polaroid 1", polaroidRenderer))
-        add(FrameTemplate("sunset", "Polaroid 2", sunsetRenderer))
-        add(FrameTemplate("bottom_bar", "Bottom Bar", bottomBarRenderer))
+        add(FrameTemplate("polaroid", "Polaroid 1", R.drawable.preview_polaroid, null , polaroidRenderer))
+        add(FrameTemplate("sunset", "Polaroid 2", R.drawable.preview_sunset, R.drawable.preview_sunset, sunsetRenderer))
+        add(FrameTemplate("bottom_bar", "Bottom Bar", R.drawable.preview_bottom_bar, null, bottomBarRenderer))
 
 
         //RenderEffect-based template only if the device supports it.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            add(FrameTemplate("aero_blue", "Modern Polaroid", aeroBlueRenderer))
+            add(FrameTemplate("aero_blue", "Modern Polaroid", R.drawable.preview_aero_blue, null, aeroBlueRenderer))
         }
     }
 

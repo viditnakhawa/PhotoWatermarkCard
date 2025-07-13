@@ -14,6 +14,7 @@ import com.viditnakhawa.photowatermarkcard.ExifData
 import com.viditnakhawa.photowatermarkcard.templates.TemplateRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.graphics.Matrix
 
 /**
  * ----------------------------------------------------
@@ -67,11 +68,13 @@ object FrameUtils {
                 // --- Build final device name (allow custom override) ---
                 val sharedPrefs = context.getSharedPreferences("AutoFramePrefs", Context.MODE_PRIVATE)
                 val customModel = sharedPrefs.getString("custom_device_model", null)
-                val modelName = if (!customModel.isNullOrBlank()) customModel else Build.MODEL
-                val deviceName = "${Build.MANUFACTURER} $modelName"
+                val manufacturer = exifDataForDisplay.make ?: Build.MANUFACTURER
+                val modelName = customModel ?: exifDataForDisplay.model ?: Build.MODEL
+                val deviceName = "$manufacturer $modelName"
+
 
                 // --- Delegate to the selected template renderer ---
-                val framedBitmap = template.renderer.render(context, originalBitmap, exifDataForDisplay, deviceName)
+                val framedBitmap = template.renderer.render(context, originalBitmap, exifDataForDisplay, deviceName, manufacturer, modelName)
 
                 // --- Save the result to MediaStore/Gallery ---
                 saveBitmapToGallery(context, framedBitmap, deviceName, imageUri)
@@ -124,7 +127,13 @@ object FrameUtils {
                     aperture = exifInterface.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" } ?: "N/A",
                     shutterSpeed = exifInterface.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { formatShutterSpeed(it.toFloatOrNull()) } ?: "N/A",
                     iso = exifInterface.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS) ?: "N/A",
-                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: ""
+                    timestamp = exifInterface.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: "",
+                    gpsLatitude = exifInterface.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
+                    gpsLatitudeRef = exifInterface.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
+                    gpsLongitude = exifInterface.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
+                    gpsLongitudeRef = exifInterface.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
+                    make = exifInterface.getAttribute(ExifInterface.TAG_MAKE),
+                    model = exifInterface.getAttribute(ExifInterface.TAG_MODEL)
                 )
             }
         } catch (e: Exception) {
@@ -167,10 +176,8 @@ object FrameUtils {
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AutoFramed")
-                        put(MediaStore.MediaColumns.IS_PENDING, 1) // mark as pending while writing
-                    }
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AutoFramed")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1) // mark as pending while writing
                 }
 
                 // --- Insert into MediaStore ---
@@ -181,13 +188,12 @@ object FrameUtils {
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     }
 
-                    // --- Mark file as ready (remove IS_PENDING flag) ---
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        contentValues.clear()
-                        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                        resolver.update(uri, contentValues, null, null)
-                    }
                     ExifUtils.copyExifData(context, originalUri, uri)
+
+                    // --- Mark file as ready (remove IS_PENDING flag) ---
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
                 }
 
                 // --- Notify user and refresh gallery ---

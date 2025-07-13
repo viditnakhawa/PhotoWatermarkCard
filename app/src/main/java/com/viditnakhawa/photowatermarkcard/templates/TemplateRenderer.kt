@@ -13,6 +13,9 @@ interface TemplateRenderer {
         context: Context,
         original: Bitmap,
         exif: ExifData,
-        deviceName: String
+        deviceName: String,
+        manufacturer: String,
+        model: String
     ): Bitmap
 }
+
