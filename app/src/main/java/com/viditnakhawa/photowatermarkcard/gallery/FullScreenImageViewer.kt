@@ -42,6 +42,7 @@ import android.util.Log
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import coil.request.ImageRequest
 import kotlinx.coroutines.coroutineScope
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -63,7 +64,7 @@ fun FullScreenImageViewer(
 
     val isCurrentZoomed by remember {
         derivedStateOf {
-            zoomStates[pagerState.currentPage] ?: false
+            zoomStates[pagerState.currentPage] == true
         }
     }
 
@@ -163,6 +164,7 @@ fun ZoomableAsyncImage(
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    val context = LocalContext.current
     val TAG = "ZoomableImage"
 
     LaunchedEffect(imageUri) {
@@ -174,8 +176,17 @@ fun ZoomableAsyncImage(
     BoxWithConstraints(modifier = modifier) {
         val constraints = this@BoxWithConstraints.constraints
 
+        val imageRequest = remember(imageUri) {
+            ImageRequest.Builder(context)
+                .data(imageUri)
+                .size(2048)
+                .allowHardware(false) //Software bitmap to enable HDR gain map display
+                .crossfade(true)
+                .build()
+        }
+
         AsyncImage(
-            model = imageUri,
+            model = imageRequest, // <-- Use the custom request
             contentDescription = "Full-screen Zoomable Image",
             contentScale = ContentScale.Fit,
             modifier = Modifier
