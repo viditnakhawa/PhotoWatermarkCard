@@ -49,8 +49,13 @@
 
 - Preserves the original photo’s resolution and properly handles all EXIF orientation tags.
 - Saves all framed photos into a dedicated **“AutoFramed”** album.
-- Ultra HDR Compatible: Preserves and displays Ultra HDR gain maps for brilliant, high-contrast photos on compatible devices.
 - Optimized for performance and battery life using modern Android APIs like `WorkManager` and `ContentObserver`.
+- **Ultra HDR Compatible:** Preserves and displays Ultra HDR gain maps for brilliant, high-contrast photos on compatible devices. 
+
+✨ What is **Ultra HDR**?
+Here is a concise, user-friendly explanation you can use:
+> Ultra HDR & Gain Map Support: Go beyond standard brightness. Ultra HDR allows photos to display incredibly bright highlights and deep, detailed shadows on compatible screens. AutoFrame preserves the original gain map—the data that tells the screen how to produce this brilliant, high-contrast look—ensuring your framed photos retain their full dynamic range and visual pop. 💥
+
 
 ---
 
