@@ -12,6 +12,9 @@ import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import com.viditnakhawa.photowatermarkcard.R
 import com.viditnakhawa.photowatermarkcard.observers.NewImageObserver
+import android.app.PendingIntent
+import androidx.core.net.toUri
+import com.viditnakhawa.photowatermarkcard.MainActivity
 
 class AutoFrameService : Service() {
 
@@ -50,10 +53,21 @@ class AutoFrameService : Service() {
         )
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
 
+        val deepLinkIntent = Intent(
+            Intent.ACTION_VIEW,
+            "app://photowatermarkcard/automation".toUri(),
+            this,
+            MainActivity::class.java
+        )
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, deepLinkIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("AutoFrame Active")
             .setContentText("Watching for new photos to frame.")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(pendingIntent)
             .build()
     }
 

@@ -7,6 +7,7 @@ import androidx.navigation.compose.rememberNavController
 import com.viditnakhawa.photowatermarkcard.AutomationScreen
 import com.viditnakhawa.photowatermarkcard.gallery.GalleryScreen
 import com.viditnakhawa.photowatermarkcard.templates.FrameTemplatesScreen
+import androidx.navigation.navDeepLink
 
 object AppRoutes {
     const val AUTOMATION_SCREEN = "automation"
@@ -22,7 +23,10 @@ fun AppNavigation() {
         navController = navController,
         startDestination = AppRoutes.GALLERY_SCREEN
     ) {
-        composable(AppRoutes.AUTOMATION_SCREEN) {
+        composable(
+            route = AppRoutes.AUTOMATION_SCREEN,
+            deepLinks = listOf(navDeepLink { uriPattern = "app://photowatermarkcard/automation" })
+        ) {
             AutomationScreen(
                 onNavigateBack = {
                     navController.popBackStack()
