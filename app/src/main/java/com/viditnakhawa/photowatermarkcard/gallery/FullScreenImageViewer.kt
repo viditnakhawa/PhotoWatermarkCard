@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.Window
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -16,29 +15,15 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,8 +38,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import androidx.compose.ui.tooling.preview.Preview
-import com.viditnakhawa.photowatermarkcard.ui.theme.PhotoWatermarkCardTheme
+import android.util.Log
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import kotlinx.coroutines.coroutineScope
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -63,54 +51,60 @@ fun FullScreenImageViewer(
     initialIndex: Int,
     onDismiss: () -> Unit,
     onDelete: (Uri) -> Unit,
-    onEdit: (Uri) -> Unit
 ) {
-
     val pagerState = rememberPagerState(
         initialPage = initialIndex,
         pageCount = { imageItems.size }
     )
+    var controlsVisible by remember { mutableStateOf(true) }
+    var showDeleteDialog by remember { mutableStateOf<Uri?>(null) }
+    val window = getActivityWindow()
+    val zoomStates = remember { mutableStateMapOf<Int, Boolean>() }
+
+    val isCurrentZoomed by remember {
+        derivedStateOf {
+            zoomStates[pagerState.currentPage] ?: false
+        }
+    }
+
+    DisposableEffect(window) {
+        val originalColorMode = window?.attributes?.colorMode ?: ActivityInfo.COLOR_MODE_DEFAULT
+        window?.colorMode = ActivityInfo.COLOR_MODE_HDR
+        onDispose {
+            window?.colorMode = originalColorMode
+        }
+    }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            zoomStates.clear()
+            onDismiss()
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        var controlsVisible by remember { mutableStateOf(true) }
-        var showDeleteDialog by remember { mutableStateOf<Uri?>(null) }
-        val window = getActivityWindow()
-
-        // Set HDR color mode for the window
-        DisposableEffect(window) {
-            val originalColorMode = window?.attributes?.colorMode ?: ActivityInfo.COLOR_MODE_DEFAULT
-            window?.colorMode = ActivityInfo.COLOR_MODE_HDR
-            onDispose {
-                window?.colorMode = originalColorMode
-            }
-        }
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.9f))
-                .pointerInput(Unit) {
-                    // Toggle controls visibility on tap
-                    detectTapGestures(onTap = { controlsVisible = !controlsVisible })
-                }
         ) {
-            // The core of the new viewer: the HorizontalPager
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = !isCurrentZoomed
             ) { pageIndex ->
-                // Each page in the pager is a zoomable image
+
+                if (zoomStates[pageIndex] == null) {
+                    zoomStates[pageIndex] = false
+                }
+
                 ZoomableAsyncImage(
                     imageUri = imageItems[pageIndex].galleryItem.uri,
                     modifier = Modifier.fillMaxSize(),
-                    onTap = { controlsVisible = !controlsVisible }
+                    onTap = { controlsVisible = !controlsVisible },
+                    onZoomStateChanged = { zoomed -> zoomStates[pageIndex] = zoomed }
                 )
             }
 
-            // --- UI Controls (Close button, Bottom Bar) ---
             AnimatedVisibility(
                 visible = controlsVisible,
                 enter = fadeIn(animationSpec = tween(150)),
@@ -140,12 +134,7 @@ fun FullScreenImageViewer(
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
                         },
-                        onEdit = {
-                            val currentUri = imageItems[pagerState.currentPage].galleryItem.uri
-                            onEdit(currentUri)
-                        },
                         onDelete = {
-                            // Show confirmation dialog for the current image
                             showDeleteDialog = imageItems[pagerState.currentPage].galleryItem.uri
                         }
                     )
@@ -153,7 +142,6 @@ fun FullScreenImageViewer(
             }
         }
 
-        // --- Delete Confirmation Dialog ---
         showDeleteDialog?.let { uriToDelete ->
             DeleteConfirmationDialog(
                 onConfirm = {
@@ -170,33 +158,78 @@ fun FullScreenImageViewer(
 fun ZoomableAsyncImage(
     imageUri: Uri,
     modifier: Modifier = Modifier,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    onZoomStateChanged: (Boolean) -> Unit
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    val TAG = "ZoomableImage"
 
-    Box(
-        modifier = modifier
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { onTap() })
-            }
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    if (scale > 1f) {
-                        offset += pan
-                    } else {
-                        offset = Offset.Zero
-                    }
-                }
-            }
-    ) {
+    LaunchedEffect(imageUri) {
+        scale = 1f
+        offset = Offset.Zero
+        onZoomStateChanged(false)
+    }
+
+    BoxWithConstraints(modifier = modifier) {
+        val constraints = this@BoxWithConstraints.constraints
+
         AsyncImage(
             model = imageUri,
             contentDescription = "Full-screen Zoomable Image",
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()
+                .pointerInput(Unit) {
+                    coroutineScope {
+                        detectTapGestures(onTap = { onTap() })
+                    }
+                }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val down = awaitFirstDown()
+                            var wasZooming = false
+                            var wasPanning = false
+
+                            do {
+                                val event = awaitPointerEvent()
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+
+                                if (zoom != 1f) {
+                                    wasZooming = true
+                                    val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                    Log.d(TAG, "Zoom detected: newScale = $newScale")
+                                    scale = newScale
+                                    onZoomStateChanged(scale > 1f)
+                                }
+
+                                if (pan != Offset.Zero) {
+                                    if (scale > 1f) {
+                                        wasPanning = true
+                                        Log.d(TAG, "Pan detected: CONSUMING PAN because scale is $scale")
+                                        val maxPanX = (constraints.maxWidth * (scale - 1)) / 2f
+                                        val maxPanY = (constraints.maxHeight * (scale - 1)) / 2f
+                                        val newOffsetX = (offset.x + pan.x).coerceIn(-maxPanX, maxPanX)
+                                        val newOffsetY = (offset.y + pan.y).coerceIn(-maxPanY, maxPanY)
+                                        offset = Offset(newOffsetX, newOffsetY)
+                                    } else {
+                                        Log.d(TAG, "Pan detected: IGNORING PAN because scale is 1f. Pager should swipe.")
+                                    }
+                                }
+
+                                if (wasZooming || wasPanning) {
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+
+                            if (scale == 1f) {
+                                offset = Offset.Zero
+                            }
+                        }
+                    }
+                }
                 .graphicsLayer(
                     scaleX = scale,
                     scaleY = scale,
@@ -211,7 +244,6 @@ fun ZoomableAsyncImage(
 fun ViewerBottomBar(
     modifier: Modifier = Modifier,
     onShare: (Context) -> Unit,
-    onEdit: (Context) -> Unit,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
@@ -227,7 +259,6 @@ fun ViewerBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ActionButton(icon = Icons.Outlined.Share, text = "Share") { onShare(context) }
-            ActionButton(icon = Icons.Outlined.Edit, text = "Edit") { onEdit(context) }
             ActionButton(icon = Icons.Outlined.Delete, text = "Delete") { onDelete() }
         }
     }
@@ -248,7 +279,6 @@ private fun ActionButton(
         Text(text, fontSize = 12.sp)
     }
 }
-
 
 @Composable
 fun DeleteConfirmationDialog(
@@ -293,11 +323,10 @@ fun getActivityWindow(): Window? {
 //            imageUri = sampleUri,
 //            onDismiss = {},
 //            onDelete = {},
-//            onEdit = {}
 //        )
 //    }
 //}
-//
+
 //@Preview(showBackground = true, backgroundColor = 0xFF000000)
 //@Composable
 //private fun ViewerBottomBarPreview() {
@@ -305,13 +334,12 @@ fun getActivityWindow(): Window? {
 //        Box(modifier = Modifier.padding(16.dp)) {
 //            ViewerBottomBar(
 //                onShare = {},
-//                onEdit = {},
 //                onDelete = {}
 //            )
 //        }
 //    }
 //}
-//
+
 //@Preview
 //@Composable
 //private fun DeleteConfirmationDialogPreview() {
